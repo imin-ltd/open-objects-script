@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+set -o errexit
+set -o nounset
+set -o pipefail
+# Uncomment the following line in order to debug
+# set -o xtrace
+# required commands: awk, curl, jq, sleep
+# only run script if exactly 5 arguments are passed
+if [ "$#" != "5" ]
+then
+  printf 'Usage: %s <rpde-endpoint> <api-key> <output-file-path> <index-file-prefix> <request-delay-seconds>\n' "$0"
+  exit 1
+fi
+page=1
+base=$(printf '%s' "$1" | awk -F/ '{print $1 "//" $3}')
+last_next_url=
+next_url="$1"
+api_key="$2"
+path="$3"
+prefix="$4"
+request_delay_seconds="$5"
+num_items=-1
+start_html='<a href="/'
+end_html='">file</a>'
+record_state=
+index_filename="${path}${prefix}-index.html"
+# set our datestamp to today
+datestamp="$(date +'%d/%m/%Y')"
+# clear down index file
+> "${index_filename}"
+# remove all json files
+rm -f ${path}${prefix}*.json
+# echo "Links to files" > "${index_filename}"
+# Stop paging if the "next" url is the same as in the last page. This is the end of the feed as defined by RPDE
+while [ "${next_url}" != "${last_next_url}" ]
+do
+  last_next_url="${next_url}"
+  # Download the page
+  printf '[%s] Downloading %s..\n'  "$(gdate +%s%N)" "${next_url}" # --
+  page_json=$(curl -L -sS "${next_url}" --header "X-API-KEY: ${api_key}")
+  printf '[%s] Downloaded\n' "$(gdate +%s%N)" # --
+  # Split the page into files - one file for each item
+  for i in $(echo ${page_json} | jq --raw-output '(.items | keys)[]'); do
+    printf '[%s] Saving item %s..\n' "$(gdate +%s%N)" "${i}"
+    filename="${path}${prefix}-rpde-${page}-${i}.json"
+    # Exclude deleted records
+    printf '[%s] Getting record state..\n' "$(gdate +%s%N)"
+    record_state=`echo ${page_json} | jq ".items[${i}].state"`
+    printf '[%s] Got record state..\n' "$(gdate +%s%N)"
+    printf '[%s] Saving file..\n' "$(gdate +%s%N)"
+    if [ ${record_state} == '"deleted"' ]; then
+        echo ${i}
+    else
+        #echo "${datestamp}"
+        echo ${page_json} | jq --arg myArg "${datestamp}" ".items[${i}] + {\"datestamp\": \"$datestamp\"}" > "${filename}"
+        echo "${start_html}${prefix}-rpde-${page}-${i}.json${end_html}" >> "${index_filename}"
+    fi
+    printf '[%s] Saved file\n' "$(gdate +%s%N)"
+  done
+  # Get meta information from the page
+  next_url="$(echo "${page_json}" | jq -r '.next')"
+  num_items="$(echo "${page_json}" | jq -r '.items | length')"
+  printf 'got page: %s, with next url: %s, num items: %s\n' "${page}" "${next_url}" "${num_items}"
+  # If "next" URL isn't an absolute URL, like /rpde?afterTimestamp=123&afterId=abc, prepend the base URL to it to create an absolute URL
+  case ${next_url} in /*)
+    next_url="${base}${next_url}"
+  esac
+  page=$((page=page+1))
+  # Wait for a bit between requests in case there is a rate limit
+  if [ "${next_url}" != "${last_next_url}" ]
+    then
+      sleep "${request_delay_seconds}"
+  fi
+done
