@@ -1,0 +1,29 @@
+{
+  "name": "open-objects-script",
+  "version": "1.0.0",
+  "description": "",
+  "main": "walkRpde.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imin-ltd/open-objects-script.git"
+  },
+  "author": "Civaram Sivakumaran <civ.sivakumaran@gmail.com> (https://github.com/civsiv), Luke Winship <luke.winship@gmail.com> (https://github.com/lukehesluke)",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/imin-ltd/open-objects-script/issues"
+  },
+  "homepage": "https://github.com/imin-ltd/open-objects-script#readme",
+  "devDependencies": {
+    "@types/node": "^14.0.22",
+    "typescript": "^3.9.6"
+  },
+  "dependencies": {
+    "axios": "^0.19.2"
+  },
+  "engines": {
+    "node": "12.18.2"
+  }
+}
