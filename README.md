@@ -16,9 +16,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## How to use
 
-N.B. the `output-file-path` directory **will be removed** when this script is run,
+**N.B.** the `output-file-path` directory **will be removed** when this script is run,
 so take care not to set it to e.g. `/`. The directory should only hold files
 outputted by this script and nothing else.
+
+You will need Node.js ^12.18.2 (LTS as of July 2020)
 
 1. `npm install`
 2. Run script
