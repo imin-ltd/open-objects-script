@@ -5,6 +5,7 @@
  */
 const { default: axios } = require('axios');
 const fsPromises = require('fs').promises;
+const fs = require('fs-extra');
 const { performance } = require('perf_hooks');
 
 /**
@@ -85,9 +86,13 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   const indexFilename = `${outputFilePath}${indexFilePrefix}-index.html`;
   const requestDelaySeconds = Number(requestDelaySecondsStr);
 
+
   // ## Wipe existing output directory
-  await fsPromises.rmdir(outputFilePath, { recursive: true });
-  await fsPromises.mkdir(outputFilePath);
+  if (await fs.pathExists(outputFilePath)) {
+    await fs.emptyDir(outputFilePath);
+  } else {
+    await fsPromises.mkdir(outputFilePath);
+  }
 
   // ## Create empty index file
   await fsPromises.writeFile(indexFilename, '');
@@ -95,14 +100,27 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   // ## Download entire feed
   let pageNum = 0;
   let nextUrl = rpdeEndpoint;
+  let backoffTimeInSeconds = 1;
+  const BACKOFF_TIME_UPPER_LIMIT = 1024; // ~17 mins
   while (true) {
-    const nextNextUrl = await downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFilename, datestamp }, pageNum, nextUrl);
-    if (nextNextUrl === nextUrl) {
-      // We have reached the end of the feed
-      break;
+    let nextNextUrl;
+    try {
+      nextNextUrl = await downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFilename, datestamp }, pageNum, nextUrl);
+      if (nextNextUrl === nextUrl) {
+        // We have reached the end of the feed
+        break;
+      }
+      nextUrl = nextNextUrl;
+      pageNum += 1;
+      backoffTimeInSeconds = 1;
+      await wait(requestDelaySeconds * 1000);
+    } catch (error) {
+      if (backoffTimeInSeconds > BACKOFF_TIME_UPPER_LIMIT) {
+        console.log('Failure: Cannot download Firehose pages, backoff limit reached, terminating script');
+        break;
+      }
+      await wait(backoffTimeInSeconds * 1000);
+      backoffTimeInSeconds = backoffTimeInSeconds * 2;
     }
-    nextUrl = nextNextUrl;
-    pageNum += 1;
-    await wait(requestDelaySeconds * 1000);
   }
 })();
