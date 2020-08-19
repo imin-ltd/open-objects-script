@@ -16,8 +16,7 @@ const DO_DEBUG_PERFORMANCE = false;
 
 // Parameters controlling retry backoff
 const RETRY_BACKOFF_MIN = 1;
-// const RETRY_BACKOFF_MAX = 1024; // ~ 17 mins
-const RETRY_BACKOFF_MAX = 4;
+const RETRY_BACKOFF_MAX = 1024; // ~ 17 mins
 const RETRY_BACKOFF_EXPONENTIATION_RATE = 2;
 
 const MIN_REQUEST_DELAY_SECONDS = 0.1;
