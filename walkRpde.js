@@ -23,6 +23,16 @@ const MIN_REQUEST_DELAY_SECONDS = 0.1;
 
 class IminValidationError extends Error { }
 
+class Http404Error extends Error {
+  /**
+   * @param {string} url 
+   */
+  constructor(url) {
+    super(`Page not found: "${url}"`);
+    this.url = url;
+  }
+}
+
 /**
  * @param {number} ms
  */
@@ -71,7 +81,15 @@ function loggableAxiosError(error) {
 async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFilename, datestamp }, pageNum, pageUrl) {
   // ## Download the page
   logPerformance(`[${performance.now()}] Downloading ${pageUrl}..`);
-  const rpdePage = await axios(pageUrl, { headers: { 'x-api-key': apiKey }});
+  const rpdePage = await axios(pageUrl, {
+    validateStatus: (status) =>
+      // HTTP 404 is allowed so that we can assign special treatment
+      (status >= 200 && status < 300) || status === 404,
+    headers: { 'x-api-key': apiKey },
+  });
+  if (rpdePage.status === 404) {
+    throw new Http404Error(pageUrl);
+  }
   // ## Validate the page
   if (typeof rpdePage.data.next !== 'string' || !rpdePage.data.next) {
     throw new IminValidationError(`RPDE .next should be a non-empty string. Value: ${util.inspect(rpdePage.data.next)}`);
@@ -154,6 +172,7 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   let nextUrl = rpdeEndpoint;
   let backoffTimeInSeconds = RETRY_BACKOFF_MIN;
   while (true) {
+    /** @type {string} */
     let nextNextUrl;
     try {
       nextNextUrl = await downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFilename, datestamp }, pageNum, nextUrl);
@@ -166,12 +185,16 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
       backoffTimeInSeconds = RETRY_BACKOFF_MIN;
       await wait(requestDelaySeconds * 1000);
     } catch (error) {
+      if (error instanceof Http404Error) {
+        console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`)
+        process.exit(1);
+      }
       const loggableError = (error && error.isAxiosError)
         ? loggableAxiosError(error)
         : error;
       console.warn(`WARN: Retrying [page: "${nextUrl}"] due to error:`, loggableError);
       if (backoffTimeInSeconds > RETRY_BACKOFF_MAX) {
-        console.error('Failure: Cannot download Firehose pages, backoff limit reached, terminating script');
+        console.error('ERROR: Cannot download Firehose pages, backoff limit reached, terminating script');
         process.exit(1);
       }
       await wait(backoffTimeInSeconds * 1000);
