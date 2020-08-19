@@ -7,11 +7,22 @@ const { default: axios } = require('axios');
 const fsPromises = require('fs').promises;
 const fs = require('fs-extra');
 const { performance } = require('perf_hooks');
+const util = require('util');
 
 /**
  * Set this to true in order to log timings of tasks within the script
  */
 const DO_DEBUG_PERFORMANCE = false;
+
+// Parameters controlling retry backoff
+const RETRY_BACKOFF_MIN = 1;
+// const RETRY_BACKOFF_MAX = 1024; // ~ 17 mins
+const RETRY_BACKOFF_MAX = 4;
+const RETRY_BACKOFF_EXPONENTIATION_RATE = 2;
+
+const MIN_REQUEST_DELAY_SECONDS = 0.1;
+
+class IminValidationError extends Error { }
 
 /**
  * @param {number} ms
@@ -30,6 +41,24 @@ function logPerformance(msg) {
 }
 
 /**
+ * Axios errors have a gargantuan amount of barely relevant data that makes
+ * them unserializable. Here, it is simplified so that it can be logged.
+ *
+ * @param {import('axios').AxiosError} error
+ */
+function loggableAxiosError(error) {
+  return {
+    message: error.message,
+    url: error.config.url,
+    response: error.response && {
+      status: error.response.status,
+      headers: error.response.headers,
+      data: error.response.data,
+    },
+  };
+}
+
+/**
  * @param {object} args
  * @param {string} args.apiKey
  * @param {string} args.outputFilePath
@@ -44,8 +73,25 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   // ## Download the page
   logPerformance(`[${performance.now()}] Downloading ${pageUrl}..`);
   const rpdePage = await axios(pageUrl, { headers: { 'x-api-key': apiKey }});
+  // ## Validate the page
+  if (typeof rpdePage.data.next !== 'string' || !rpdePage.data.next) {
+    throw new IminValidationError(`RPDE .next should be a non-empty string. Value: ${util.inspect(rpdePage.data.next)}`);
+  }
+  if (!Array.isArray(rpdePage.data.items)) {
+    throw new IminValidationError(`RPDE .items should be an array. Value: ${util.inspect(rpdePage.data.items)}`);
+  }
+  // use findIndex() rather than find() because find() returns `undefined`
+  // for "not found", which is indistinguishable from "i found one and it is
+  // undefined". We also want to validate that no items are undefined
+  const invalidItemIndex = rpdePage.data.items.findIndex(item => !item || (item.state !== 'updated' && item.state !== 'deleted'));
+  if (invalidItemIndex > 0) {
+    const invalidItem = rpdePage.data.items[invalidItemIndex];
+    const invalidItemId = invalidItem && invalidItem.id;
+    throw new IminValidationError(`item [index: "${invalidItemIndex}" ; id: "${invalidItemId}"] should be non-null and have state=updated|deleted. It does not`);
+  }
   logPerformance(`[${performance.now()}] Downloaded`);
   // ## Split the page into files - one file for each item
+  const filenames = [];
   for (const i in rpdePage.data.items) {
     logPerformance(`[${performance.now()}] Processing item ${i}..`);
     const item = rpdePage.data.items[i];
@@ -57,12 +103,14 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
       const filePath = `${outputFilePath}${filename}`;
       item.datestamp = datestamp; // ! mutate item
       await fsPromises.writeFile(filePath, JSON.stringify(item));
-      // ### Save file entry to index
-      await fsPromises.appendFile(indexFilename, `<a href="/${filename}">file</a>`);
+      filenames.push(filename);
       logPerformance(`[${performance.now()}] Saved item ${i}`);
     }
     logPerformance(`[${performance.now()}] Processed item ${i}`);
   }
+  // ## Save file entries to index
+  const indexEntries = filenames.map(filename => `<a href="/${filename}">file</a>`).join('');
+  await fsPromises.appendFile(indexFilename, indexEntries);
   const nextPageUrl = rpdePage.data.next;
   const numItems = rpdePage.data.items.length;
   console.log(`got page: ${pageNum}, with next url: ${nextPageUrl}, num items: ${numItems}`);
@@ -84,7 +132,12 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   const date = new Date();
   const datestamp = `${date.getDate().toString().padStart(2, '0')}/${date.getMonth().toString().padStart(2, '0')}/${date.getFullYear()}`;
   const indexFilename = `${outputFilePath}${indexFilePrefix}-index.html`;
-  const requestDelaySeconds = Number(requestDelaySecondsStr);
+  const requestDelaySeconds = (() => {
+    // Request delay seconds has a minimum value
+    const initialValue = Number(requestDelaySecondsStr);
+    if (Number.isNaN(initialValue)) { return MIN_REQUEST_DELAY_SECONDS; }
+    return Math.max(initialValue, MIN_REQUEST_DELAY_SECONDS);
+  })();
 
 
   // ## Wipe existing output directory
@@ -100,8 +153,7 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
   // ## Download entire feed
   let pageNum = 0;
   let nextUrl = rpdeEndpoint;
-  let backoffTimeInSeconds = 1;
-  const BACKOFF_TIME_UPPER_LIMIT = 1024; // ~17 mins
+  let backoffTimeInSeconds = RETRY_BACKOFF_MIN;
   while (true) {
     let nextNextUrl;
     try {
@@ -112,15 +164,19 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
       }
       nextUrl = nextNextUrl;
       pageNum += 1;
-      backoffTimeInSeconds = 1;
+      backoffTimeInSeconds = RETRY_BACKOFF_MIN;
       await wait(requestDelaySeconds * 1000);
     } catch (error) {
-      if (backoffTimeInSeconds > BACKOFF_TIME_UPPER_LIMIT) {
-        console.log('Failure: Cannot download Firehose pages, backoff limit reached, terminating script');
-        break;
+      const loggableError = (error && error.isAxiosError)
+        ? loggableAxiosError(error)
+        : error;
+      console.warn(`WARN: Retrying [page: "${nextUrl}"] due to error:`, loggableError);
+      if (backoffTimeInSeconds > RETRY_BACKOFF_MAX) {
+        console.error('Failure: Cannot download Firehose pages, backoff limit reached, terminating script');
+        process.exit(1);
       }
       await wait(backoffTimeInSeconds * 1000);
-      backoffTimeInSeconds = backoffTimeInSeconds * 2;
+      backoffTimeInSeconds = backoffTimeInSeconds * RETRY_BACKOFF_EXPONENTIATION_RATE;
     }
   }
 })();
