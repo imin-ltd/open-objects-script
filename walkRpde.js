@@ -126,7 +126,7 @@ async function downloadPage({ apiKey, outputFilePath, indexFilePrefix, indexFile
     logPerformance(`[${performance.now()}] Processed item ${i}`);
   }
   // ## Save file entries to index
-  const indexEntries = filenames.map(filename => `<a href="/${filename}">file</a>`).join('');
+  const indexEntries = filenames.map(filename => `<a href="${filename}">file</a>`).join('');
   await fsPromises.appendFile(indexFilename, indexEntries);
   const nextPageUrl = rpdePage.data.next;
   const numItems = rpdePage.data.items.length;
