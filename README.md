@@ -32,7 +32,7 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
   e.g.
 
   ```sh
-  node walkRpde.js 'https://firehose.imin.co/firehose/session-series' <api-key> session-series/ rpde 0.1
+  node walkRpde.js 'https://firehose.imin.co/firehose/standard/session-series' <api-key> session-series/ rpde 0.1
   ```
 
 ## Files
