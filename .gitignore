@@ -1,3 +1,5 @@
 node_modules/
 session-series/
 scheduled-sessions/
+output/
+sessionseries/

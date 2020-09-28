@@ -18,11 +18,17 @@
   "homepage": "https://github.com/imin-ltd/open-objects-script#readme",
   "devDependencies": {
     "@types/node": "^14.0.22",
+    "eslint": "^7.9.0",
+    "eslint-config-airbnb-base": "^14.2.0",
+    "eslint-plugin-import": "^2.22.0",
     "typescript": "^3.9.6"
   },
   "dependencies": {
     "axios": "^0.19.2",
-    "fs-extra": "^9.0.1"
+    "fs-extra": "^9.0.1",
+    "geolib": "^3.3.1",
+    "joi": "^17.2.1",
+    "moment-timezone": "^0.5.31"
   },
   "engines": {
     "node": "12.18.2"

@@ -1,0 +1,12 @@
+{
+  "firehoseBaseUrl": "https://firehose.imin.co/firehose/",
+  "firehoseApiKey": "",
+  "segments": [
+    {
+      "identifier": "example",
+      "latitude": 51.4771457,
+      "longitude": -0.1315844,
+      "radius": 2
+    }
+  ]
+}
