@@ -220,7 +220,7 @@ async function downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments) 
     let nextNextUrl;
     let items;
     try {
-      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey)); // TODO logContext
+      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey));
     } catch (error) {
       if (error instanceof Http404Error) {
         console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
@@ -293,7 +293,7 @@ async function downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey) {
     let nextNextUrl;
     let items;
     try {
-      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey)); // TODO logContext
+      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey));
     } catch (error) {
       if (error instanceof Http404Error) {
         console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);

@@ -19,8 +19,8 @@ function logPerformance(msg) {
 }
 
 /**
- * @param {AxiosRequestConfig} requestConfig
- * @param {{[k: string]: unknown}} logContext
+ * @param {string} pageUrl
+ * @param {string} apiKey
  */
 async function getFirehosePage(pageUrl, apiKey) {
   // ## Download the page
