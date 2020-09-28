@@ -345,10 +345,6 @@ async function downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey) {
   // Download and write SessionSeries
   await downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments);
 
-  // TODO REMOVE
-  // const sessionSeriesFilenames = await (await fs.readdir(SESSION_SERIES_DIRECTORY_PATH)).map((a) => decodeURIComponent(a)).map((a) => a.replace('.json', ''));
-  // SESSION_SERIES_UNENCODED_FILE_NAMES.push(...sessionSeriesFilenames);
-
   // Download and write ScheduledSessions into segment directories
   await downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey);
 
