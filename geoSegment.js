@@ -11,6 +11,7 @@ const { wait } = require('./utils/wait');
 const { loggableAxiosError } = require('./utils/loggableAxiosError');
 const { emptyOrMakeDirectory } = require('./utils/emptyOrMakeDirectory');
 const { Http404Error } = require('./utils/errors');
+const { hashString } = require('./utils/hashString');
 
 // File paths
 const CONFIG_FILE_PATH = './config.json';
@@ -22,8 +23,6 @@ const RETRY_BACKOFF_MIN = 1;
 const RETRY_BACKOFF_MAX = 1024; // ~ 17 mins
 const RETRY_BACKOFF_EXPONENTIATION_RATE = 2;
 const MIN_REQUEST_DELAY_SECONDS = 0.1;
-
-const SESSION_SERIES_FILE_PATHS = [];
 
 // Event Schedule generation
 const SCHEDULE_TYPE = 'Schedule';
@@ -75,6 +74,28 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  */
 
 /**
+ * @param {string} segmentIdentifier
+ */
+function getSegmentIndexFilePath(segmentIdentifier) {
+  return `${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/index.txt`;
+}
+
+/**
+ * @param {string} sessionSeriesId
+ */
+function getSessionSeriesFilePath(sessionSeriesIdHash) {
+  return `${SESSION_SERIES_DIRECTORY_PATH}/${sessionSeriesIdHash}.json`;
+}
+
+/**
+ * @param {string} segmentIdentifier
+ * @param {string} scheduledSessionIdHash
+ */
+function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) {
+  return `${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/${scheduledSessionIdHash}.json`;
+}
+
+/**
  * @param {Segment[]} segments
  */
 async function createSegmentDirectories(segments) {
@@ -85,7 +106,7 @@ async function createSegmentDirectories(segments) {
       await emptyOrMakeDirectory(segmentDirectoryPath);
 
       // Create index file
-      await fsPromises.writeFile(`${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/index.txt`, '');
+      await fsPromises.writeFile(getSegmentIndexFilePath(segmentIdentifier), '');
     });
 }
 
@@ -102,25 +123,33 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
 
   // Write ScheduledSession into each output segment directory
   for (const segmentIdentifier of sessionSeries['imin:segment']) {
-    const filename = `${encodeURIComponent(linkedScheduledSessionData.id)}.json`;
-    await fs.writeJson(`${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/${filename}`, linkedScheduledSessionData);
-    await fs.appendFile(`${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/index.txt`, `${filename}\r\n`);
-  }
-}
+    const scheduledSessionIdHash = hashString(linkedScheduledSessionData.id);
+    const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
 
-/**
- * There is a system filepath limit of 255 characters in most file systems.
- * All sessionseries filepaths with be of the form `./sessionseries/${encodedFilename}.json`
- * Therefore the encodedFilename has to be less than 234 characters in length (./sessionseries/.json is 21 characters)
- *
- * @param {string} sessionSeriesId
- */
-function getSessionSeriesFilePath(sessionSeriesId) {
-  let encodedFilename = encodeURIComponent(sessionSeriesId);
-  if (encodedFilename.length > 234) {
-    encodedFilename = encodedFilename.slice(0, 234);
+    // Check if the ScheduledSession already exists
+    if (await fs.pathExists(scheduledSessionFilePath)) {
+      const existingScheduledSession = await fs.readJson(scheduledSessionFilePath, { throws: false });
+      if (existingScheduledSession) {
+        if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
+          // Hash clash
+          console.warn(`Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
+          continue;
+        } else {
+          // existingScheduledSession and linkedScheduledSessionData are the same and it has already been processed and saved, so do nothing
+          continue;
+        }
+      }
+    }
+    // ScheduledSession does not already exist, so save it
+    await fs.writeJson(scheduledSessionFilePath, linkedScheduledSessionData);
+
+    // Check if the ID has been written to the index file/write the ID to the index file
+    const indexFilePath = getSegmentIndexFilePath(segmentIdentifier);
+    const existingIndex = await fs.readFile(indexFilePath, 'utf8');
+    if (!existingIndex.includes(scheduledSessionIdHash)) {
+      await fs.appendFile(indexFilePath, `${scheduledSessionIdHash}\r\n`);
+    }
   }
-  return `./${SESSION_SERIES_DIRECTORY_PATH}/${encodedFilename}.json`;
 }
 
 /**
@@ -129,9 +158,13 @@ function getSessionSeriesFilePath(sessionSeriesId) {
  * @param {Segment[]} segments
  */
 async function processSessionSeriesItems(items, segments) {
-  items.forEach(async (item) => {
+  for (const item of items) {
     // Filter deleted SessionSeries
     if (item.state === 'deleted') {
+      return;
+    }
+    // If for some reason, the SessionSeries doesn't have an ID, don't process it.
+    if (!item.id) {
       return;
     }
 
@@ -171,10 +204,10 @@ async function processSessionSeriesItems(items, segments) {
     const correctedEventSchedules = []; // EventSchedules that are type Schedule but are not valid should be changed to PartialSchedule, and not generate ScheduledSessions
     if (Array.isArray(sessionSeriesData.eventSchedule)) {
       for (const eventSchedule of sessionSeriesData.eventSchedule) {
+        // Validate
         if (eventSchedule.type !== SCHEDULE_TYPE) {
           continue;
         }
-        // Validate
         const joiValidation = MINIMAL_EVENT_SCHEDULE_SCHEMA.validate(eventSchedule, {
           allowUnknown: true,
         });
@@ -188,6 +221,8 @@ async function processSessionSeriesItems(items, segments) {
           continue;
         }
 
+        // Generate
+        correctedEventSchedules.push(eventSchedule);
         scheduledSessionsForEveryEventSchedule.push(
           ...generateDatesWithinTimeWindow(eventSchedule),
         );
@@ -195,26 +230,43 @@ async function processSessionSeriesItems(items, segments) {
     }
 
     // Write SessionSeries to file
-    const sessionSeriesFilePath = getSessionSeriesFilePath(item.id);
-    await fs.writeJson(sessionSeriesFilePath, sessionSeriesData);
-    SESSION_SERIES_FILE_PATHS.push(sessionSeriesFilePath);
+    const sessionSeriesDataWithCorrectedEventSchedules = {
+      ...sessionSeriesData,
+      eventSchedule: correctedEventSchedules,
+    };
+
+    const sessionSeriesIdHash = hashString(item.id);
+    const sessionSeriesFilePath = getSessionSeriesFilePath(sessionSeriesIdHash);
+    if (await fs.pathExists(sessionSeriesFilePath)) {
+      // If the path already exists, then either the SessionSeries has already been processed and saved, or there's a hash clash
+      const sessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
+      // Hash clash
+      if (sessionSeries.id !== item.id) {
+        console.warn(`Already downloaded SessionSeries:${sessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
+        return;
+      }
+      // If the IDs are the same, then no need to do anything
+    }
+    await fs.writeJson(sessionSeriesFilePath, sessionSeriesDataWithCorrectedEventSchedules);
 
     // Write ScheduledSessions to file
     for (const generatedScheduledSession of scheduledSessionsForEveryEventSchedule) {
       await linkScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData);
     }
-  });
+  }
 }
 
 /**
- * @param {string} firehoseBaseUrl
+ * @typedef {ScheduledSessionItem[]|SessionSeriesItem[]} Items
+ * @param {string} firehosePageUrl
  * @param {string} firehoseApiKey
+ * @param {(items: Items, segments: Segment[]) => void} processItemsFn
  * @param {Segment[]} segments
+ * @param {(Segment) => void} a
  */
-async function downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments) {
-  console.log('downloadAndWriteSessionSeries() - starting');
-  // Get SessionSeries from Firehose
-  let nextUrl = `${firehoseBaseUrl}session-series`;
+async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
+  // Get page from Firehose
+  let nextUrl = firehosePageUrl;
   let backoffTimeInSeconds = RETRY_BACKOFF_MIN;
   while (true) {
     let nextNextUrl;
@@ -239,8 +291,8 @@ async function downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments) 
       continue;
     }
 
-    // Process SessionSeries items
-    await processSessionSeriesItems(items, segments);
+    // Process items
+    await processItemsFn(items, segments);
 
     // Have we reached the end of the feed?
     if (nextNextUrl === nextUrl) {
@@ -258,9 +310,13 @@ async function downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments) 
  * @param {ScheduledSessionItem[]} items
  */
 async function processScheduledSessionItems(items) {
-  items.forEach(async (scheduledSessionItem) => {
+  for (const scheduledSessionItem of items) {
     // Filter deleted ScheduledSessions
     if (scheduledSessionItem.state === 'deleted') {
+      return;
+    }
+    // If for some reason, the ScheduledSession doesn't have an ID, don't process it.
+    if (!scheduledSessionItem.id) {
       return;
     }
 
@@ -270,60 +326,26 @@ async function processScheduledSessionItems(items) {
     }
 
     // Does ScheduledSession have downloaded superEvent?
-    const scheduledSessionSuperEventId = scheduledSessionItem.data.superEvent;
-    const sessionSeriesFilePath = getSessionSeriesFilePath(scheduledSessionSuperEventId);
-    if (!SESSION_SERIES_FILE_PATHS.includes(sessionSeriesFilePath)) {
+    const scheduledSessionSuperEventIdHash = hashString(scheduledSessionItem.data.superEvent);
+    const sessionSeriesFilePath = getSessionSeriesFilePath(scheduledSessionSuperEventIdHash);
+
+    // Get SessionSeries
+    if (!(await fs.pathExists(sessionSeriesFilePath))) {
+      return;
+    }
+    const sessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
+    if (!sessionSeries) {
       return;
     }
 
-    // Get SessionSeries
-    const sessionSeries = await fs.readJson(sessionSeriesFilePath);
+    // Check SessionSeries.id and ScheduledSession.superEvent match in case there has been some hash clash
+    if (scheduledSessionItem.data.superEvent !== sessionSeries.id) {
+      console.warn(`ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
+      return;
+    }
 
     // Link ScheduledSession and SessionSeries, and write
     await linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries);
-  });
-}
-
-async function downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey) {
-  console.log('downloadAndWriteScheduledSessions() - starting');
-  // Get ScheduledSessions from Firehose
-  let nextUrl = `${firehoseBaseUrl}scheduled-sessions`;
-  let backoffTimeInSeconds = RETRY_BACKOFF_MIN;
-  while (true) {
-    let nextNextUrl;
-    let items;
-    try {
-      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey));
-    } catch (error) {
-      if (error instanceof Http404Error) {
-        console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
-        process.exit(1);
-      }
-      const loggableError = (error && error.isAxiosError)
-        ? loggableAxiosError(error)
-        : error;
-      console.warn(`WARN: Retrying [page: "${nextUrl}"] due to error:`, loggableError);
-      if (backoffTimeInSeconds > RETRY_BACKOFF_MAX) {
-        console.error('ERROR: Cannot download Firehose pages, backoff limit reached, terminating script');
-        process.exit(1);
-      }
-      await wait(backoffTimeInSeconds * 1000);
-      backoffTimeInSeconds *= RETRY_BACKOFF_EXPONENTIATION_RATE;
-      continue;
-    }
-
-    // Process SessionSeries items
-    await processScheduledSessionItems(items);
-
-    // Have we reached the end of the feed?
-    if (nextNextUrl === nextUrl) {
-      break;
-    }
-
-    // If we haven't reached the end of the feed, carry on
-    nextUrl = nextNextUrl;
-    backoffTimeInSeconds = RETRY_BACKOFF_MIN;
-    await wait(MIN_REQUEST_DELAY_SECONDS * 1000);
   }
 }
 
@@ -342,12 +364,13 @@ async function downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey) {
   // Create Segment directories
   await createSegmentDirectories(segments);
 
-  // Download and write SessionSeries
-  await downloadSessionSeries(firehoseBaseUrl, firehoseApiKey, segments);
+  // Download and process SessionSeries
+  const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
+  await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
 
-  // Download and write ScheduledSessions into segment directories
-  await downloadScheduledSessions(firehoseBaseUrl, firehoseApiKey);
+  // Download and process ScheduledSessions into segment directories
+  const scheduledSessionFirehoseUrl = `${firehoseBaseUrl}scheduled-sessions`;
+  await downloadFirehosePageAndProcess(scheduledSessionFirehoseUrl, firehoseApiKey, processScheduledSessionItems, segments);
 
   console.log('geoSegment() - finished');
-  process.exit(0);
 })();
