@@ -1,22 +1,8 @@
 const { default: axios } = require('axios');
 const util = require('util');
-const { performance } = require('perf_hooks');
 
 const { Http404Error, IminValidationError } = require('./errors');
-
-/**
- * Set this to true in order to log timings of tasks within the script
- */
-const DO_DEBUG_PERFORMANCE = true;
-
-/**
- * @param {string} msg
- */
-function logPerformance(msg) {
-  if (DO_DEBUG_PERFORMANCE) {
-    console.log(msg);
-  }
-}
+const { log } = require('./log');
 
 /**
  * @param {string} pageUrl
@@ -24,7 +10,6 @@ function logPerformance(msg) {
  */
 async function getFirehosePage(pageUrl, apiKey) {
   // ## Download the page
-  logPerformance(`[${performance.now()}] Downloading ${pageUrl}..`);
   const headers = apiKey ? { 'x-api-key': apiKey } : {};
   const rpdePage = await axios(pageUrl, {
     validateStatus: (status) => (status >= 200 && status < 300) || status === 404,
@@ -50,7 +35,7 @@ async function getFirehosePage(pageUrl, apiKey) {
     const invalidItemId = invalidItem && invalidItem.id;
     throw new IminValidationError(`item [index: "${invalidItemIndex}" ; id: "${invalidItemId}"] should be non-null and have state=updated|deleted. It does not`);
   }
-  logPerformance(`[${performance.now()}] Downloaded ${pageUrl}`);
+  log('info', `getFirehosePage() - Downloaded ${pageUrl}. Num items: ${rpdePage.data.items.length}`);
 
   return { nextNextUrl: rpdePage.data.next, items: rpdePage.data.items };
 }

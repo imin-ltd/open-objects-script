@@ -7,9 +7,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Launch",
-      "program": "${workspaceFolder}/geoSegment.js",
-      "runtimeVersion": "10.16.0",
+      "name": "Launch geoSegment",
+      "program": "${workspaceFolder}/geoSegment/geoSegment.js",
+      "runtimeVersion": "12.18.2",
       "outputCapture": "std"
     },
   ]

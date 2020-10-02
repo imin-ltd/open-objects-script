@@ -18,6 +18,7 @@
   },
   "homepage": "https://github.com/imin-ltd/open-objects-script#readme",
   "devDependencies": {
+    "@types/fs-extra": "^9.0.1",
     "@types/node": "^14.0.22",
     "eslint": "^7.9.0",
     "eslint-config-airbnb-base": "^14.2.0",

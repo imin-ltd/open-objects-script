@@ -14,18 +14,26 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## Files
+## geoSegment.js
+### How to run
 
-- `reference/original-walk-rpde`
-  The RPDE script that imin gave to OpenObjects originally.
-- `reference/oo-walk-rpde`
-  OpenObjects made a couple modifications from imin's original script. This is what they used for a time.
+You will need Node.js ^12.18.2 (LTS as of July 2020)
 
-  There's also been some performance measurements added to this script. These last two scripts were very slow.
-- `walkRpde.js`
-  A script that copies the functionality of `reference/oo-walk-rpde` but in node.js. Because JSON is only parsed once and large amounts of memory are not constantly copied, this is 100s of times faster than the bash scripts.
-- `geoSegment.js`
+1. Edit the `geoSegment/config.js` file to your desired segments
+2. `npm install`
+3. Run script
 
+  ```sh
+  node geoSegment/geoSegment.js
+  ```
+The outputs will be in the `geoSegment/output` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` 
+that contains the filename of each ScheduledSession in that folder.
+
+### Known Limitations
+
+- SHA-1 hashes of IDs are used as filenames for both SessionSeries and ScheduledSessions. It is very unlikely that these hashes will clash, but if they do
+the newer file will be dropped.
+- ScheduledSession's location is not used for geo-segmenting - only the SessionSeries's
 
 ## walkRpde.js
 ### How to use
@@ -49,23 +57,15 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
   node walkRpde.js 'https://firehose.imin.co/firehose/standard/session-series' <api-key> session-series/ rpde 0.1
   ```
 
-## geoSegment.js
-### How to run
+## Files
 
-You will need Node.js ^12.18.2 (LTS as of July 2020)
+- `reference/original-walk-rpde`
+  The RPDE script that imin gave to OpenObjects originally.
+- `reference/oo-walk-rpde`
+  OpenObjects made a couple modifications from imin's original script. This is what they used for a time.
 
-1. Edit the `config.js` file to your desired segments
-2. `npm install`
-3. Run script
-
-  ```sh
-  node geoSegment.js
-  ```
-The outputs will be in the `output` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` 
-that contains the filename of each ScheduledSession in that folder.
-
-### Known Limitations
-
-- SHA-1 hashes of IDs are used as filenames for both SessionSeries and ScheduledSessions. It is very unlikely that these hashes will clash, but if they do
-the newer file will be dropped.
-- ScheduledSession's location is not used for geo-segmenting - only the SessionSeries's
+  There's also been some performance measurements added to this script. These last two scripts were very slow.
+- `walkRpde.js`
+  A script that copies the functionality of `reference/oo-walk-rpde` but in node.js. Because JSON is only parsed once and large amounts of memory are not constantly copied, this is 100s of times faster than the bash scripts.
+- `geoSegment.js`
+  Script that downloads the Firehose feeds and segments items according to geographical criteria.

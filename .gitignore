@@ -1,6 +1,9 @@
 node_modules/
+
+.DS_Store
+
 session-series/
 scheduled-sessions/
-output/
-sessionseries/
-.DS_Store
+
+geoSegment/output/
+geoSegment/sessionseries/

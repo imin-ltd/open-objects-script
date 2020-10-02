@@ -5,7 +5,6 @@ const fs = require('fs-extra');
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
-const util = require('util');
 
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
 const { getFirehosePage } = require('./utils/getFirehosePage');
@@ -14,6 +13,7 @@ const { loggableAxiosError } = require('./utils/loggableAxiosError');
 const { emptyOrMakeDirectory } = require('./utils/emptyOrMakeDirectory');
 const { Http404Error } = require('./utils/errors');
 const { hashString } = require('./utils/hashString');
+const { log } = require('./utils/log');
 
 // File paths
 const CONFIG_FILE_PATH = path.join(__dirname, 'config.json');
@@ -63,7 +63,7 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  *  state: 'updated' | 'deleted',
  *  kind: 'SessionSeries',
  *  data: SessionSeriesData
- * }} SessionSeriesItem
+ * }} SessionSeriesRpdeItem
  * @typedef {{
  *  startDate?: string,
  *  superEvent?: string,
@@ -75,7 +75,7 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  *  state: 'updated' | 'deleted',
  *  kind: 'ScheduledSession',
  *  data: ScheduledSessionData
- * }} ScheduledSessionItem
+ * }} ScheduledSessionRpdeItem
  * @typedef {{
  *  latitude: number,
  *  longitude: number,
@@ -89,26 +89,6 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  */
 function secondsToMilliseconds(seconds) {
   return seconds * 1000;
-}
-
-/**
- * @param {'info' | 'warn' | 'error'} level
- * @param  {...unknown} messages
- */
-function log(level, ...messages) {
-  /** @type {string[]} */
-  const completeLogMsgParts = [
-    `[${moment.tz('utc').toISOString()}]`, // timestamp
-    `[${level}]`, // log level
-    ...messages.map((message) => {
-      if (typeof message === 'string') {
-        return message;
-      }
-      return util.inspect(message, false, 10);
-    }),
-  ];
-  const completeLogMsg = completeLogMsgParts.join(' ');
-  console[level](completeLogMsg);
 }
 
 /**
@@ -131,6 +111,20 @@ function getSessionSeriesFilePath(sessionSeriesIdHash) {
  */
 function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) {
   return path.join(OUTPUT_DIRECTORY_PATH, segmentIdentifier, `${scheduledSessionIdHash}.json`);
+}
+
+/**
+ * @param {string} filePath
+ */
+async function readJsonNullIfNotExists(filePath) {
+  try {
+    return await fs.readJson(filePath);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
 }
 
 /**
@@ -165,7 +159,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
 
     // Check if the ScheduledSession already exists
     {
-      const existingScheduledSession = await fs.readJson(scheduledSessionFilePath, { throws: false });
+      const existingScheduledSession = await readJsonNullIfNotExists(scheduledSessionFilePath);
       if (existingScheduledSession) {
         if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
           // Hash clash
@@ -184,13 +178,13 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     const indexFilePath = getSegmentIndexFilePath(segmentIdentifier);
     const existingIndex = await fs.readFile(indexFilePath, 'utf8');
     if (!existingIndex.includes(scheduledSessionIdHash)) {
-      await fs.appendFile(indexFilePath, `${scheduledSessionIdHash}\r\n`);
+      await fs.appendFile(indexFilePath, `${scheduledSessionIdHash}.json\r\n`);
     }
   }
 }
 
 /**
- * @param {SessionSeriesItem[]} items
+ * @param {SessionSeriesRpdeItem[]} items
  * @param {Segment[]} segments
  */
 async function processSessionSeriesItems(items, segments) {
@@ -276,7 +270,7 @@ async function processSessionSeriesItems(items, segments) {
     const sessionSeriesFilePath = getSessionSeriesFilePath(sessionSeriesIdHash);
     {
       // If the path already exists, then either the SessionSeries has already been processed and saved, or there's a hash clash
-      const existingSessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
+      const existingSessionSeries = await readJsonNullIfNotExists(sessionSeriesFilePath);
       if (existingSessionSeries) {
         // Hash clash
         if (existingSessionSeries.id !== item.id) {
@@ -331,7 +325,7 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
 }
 
 /**
- * @typedef {ScheduledSessionItem[]|SessionSeriesItem[]} Items
+ * @typedef {ScheduledSessionRpdeItem[]|SessionSeriesRpdeItem[]} Items
  * @param {string} firehosePageUrl
  * @param {string} firehoseApiKey
  * @param {(items: Items, segments: Segment[]) => void} processItemsFn
@@ -358,7 +352,7 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 }
 
 /**
- * @param {ScheduledSessionItem[]} items
+ * @param {ScheduledSessionRpdeItem[]} items
  */
 async function processScheduledSessionItems(items) {
   for (const scheduledSessionItem of items) {
@@ -381,7 +375,7 @@ async function processScheduledSessionItems(items) {
     const sessionSeriesFilePath = getSessionSeriesFilePath(scheduledSessionSuperEventIdHash);
 
     // Get SessionSeries
-    const sessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
+    const sessionSeries = await readJsonNullIfNotExists(sessionSeriesFilePath);
     if (!sessionSeries) { // File doesn't exist
       return;
     }
@@ -414,11 +408,15 @@ async function processScheduledSessionItems(items) {
 
   // Download and process SessionSeries
   const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
+  // const sessionSeriesFirehoseUrl = 'https://firehose.imin.co/firehose/standard/session-series?afterChangeNumber=35431312&limit=500';
+  log('info', 'geoSegment() - downloading SessionSeries feed..');
   await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
+  log('info', 'geoSegment() - downloaded SessionSeries feed');
 
   // Download and process ScheduledSessions into segment directories
   const scheduledSessionFirehoseUrl = `${firehoseBaseUrl}scheduled-sessions`;
+  // const scheduledSessionFirehoseUrl = 'https://firehose.imin.co/firehose/standard/scheduled-sessions?afterChangeNumber=35699502&limit=500';
+  log('info', 'geoSegment() - downloading ScheduledSession feed..');
   await downloadFirehosePageAndProcess(scheduledSessionFirehoseUrl, firehoseApiKey, processScheduledSessionItems, segments);
-
-  log('info', 'geoSegment() - finished');
+  log('info', 'geoSegment() - downloaded ScheduledSession feed. Finished');
 })();
