@@ -158,15 +158,15 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
 
     // Check if the ScheduledSession already exists
+    /** @type {boolean} */
+    let isExistingScheduledSession;
     {
       const existingScheduledSession = await readJsonNullIfNotExists(scheduledSessionFilePath);
-      if (existingScheduledSession) {
+      isExistingScheduledSession = Boolean(existingScheduledSession);
+      if (isExistingScheduledSession) {
         if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
           // Hash clash
           log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
-          continue;
-        } else {
-          // existingScheduledSession and linkedScheduledSessionData are the same and it has already been processed and saved, so do nothing
           continue;
         }
       }
@@ -174,10 +174,9 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     // ScheduledSession does not already exist, so save it
     await fs.writeJson(scheduledSessionFilePath, linkedScheduledSessionData);
 
-    // Check if the ID has been written to the index file/write the ID to the index file
-    const indexFilePath = getSegmentIndexFilePath(segmentIdentifier);
-    const existingIndex = await fs.readFile(indexFilePath, 'utf8');
-    if (!existingIndex.includes(scheduledSessionIdHash)) {
+    // Write to the index file if this ScheduledSession did not already exist
+    if (!isExistingScheduledSession) {
+      const indexFilePath = getSegmentIndexFilePath(segmentIdentifier);
       await fs.appendFile(indexFilePath, `${scheduledSessionIdHash}.json\r\n`);
     }
   }
