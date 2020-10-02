@@ -39,15 +39,23 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  * @typedef {import('axios').AxiosError} AxiosError
  * @typedef {import('axios').AxiosRequestConfig} AxiosRequestConfig
  * @typedef {import('axios').AxiosResponse} AxiosResponse
+ */
+
+/**
  * @typedef {{
- * location?: {
- *  geo?: {
- *   latitude: number,
- *   longitude: number,
+ *   geo?: {
+ *     latitude: number,
+ *     longitude: number,
  *   }
- *  },
- * [k:string]: unknown
+ * }} OaLocation
+ *
+ * @typedef {{
+ *   location?: OaLocation,
+ *   'beta:affiliatedLocation'?: OaLocation,
+ *   'imin:segment'?: string[],
+ *   [k:string]: unknown
  * }} SessionSeriesData
+ *
  * @typedef {{
  *  id: string,
  *  state: 'updated' | 'deleted',
@@ -57,6 +65,7 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  * @typedef {{
  *  startDate?: string,
  *  superEvent?: string,
+ *  id?: string,
  *  [k:string]: unknown
  * }} ScheduledSessionData
  * @typedef {{
@@ -81,7 +90,7 @@ function getSegmentIndexFilePath(segmentIdentifier) {
 }
 
 /**
- * @param {string} sessionSeriesId
+ * @param {string} sessionSeriesIdHash
  */
 function getSessionSeriesFilePath(sessionSeriesIdHash) {
   return `${SESSION_SERIES_DIRECTORY_PATH}/${sessionSeriesIdHash}.json`;
@@ -153,8 +162,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
 }
 
 /**
- *
- * @param {RpdeItem<SessionSeriesData>[]} items
+ * @param {SessionSeriesItem[]} items
  * @param {Segment[]} segments
  */
 async function processSessionSeriesItems(items, segments) {
@@ -178,6 +186,7 @@ async function processSessionSeriesItems(items, segments) {
       return;
     }
 
+    /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
       'imin:segment': [],
@@ -262,7 +271,6 @@ async function processSessionSeriesItems(items, segments) {
  * @param {string} firehoseApiKey
  * @param {(items: Items, segments: Segment[]) => void} processItemsFn
  * @param {Segment[]} segments
- * @param {(Segment) => void} a
  */
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
   // Get page from Firehose
