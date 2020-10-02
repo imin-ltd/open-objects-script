@@ -1,7 +1,7 @@
 const path = require('path');
 const { backOff } = require('exponential-backoff');
-const fsPromises = require('fs').promises;
 const fs = require('fs-extra');
+const fsPromises = require('fs').promises;
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
@@ -10,15 +10,17 @@ const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTi
 const { getFirehosePage } = require('./utils/getFirehosePage');
 const { wait } = require('./utils/wait');
 const { loggableAxiosError } = require('./utils/loggableAxiosError');
-const { emptyOrMakeDirectory } = require('./utils/emptyOrMakeDirectory');
 const { Http404Error } = require('./utils/errors');
 const { hashString } = require('./utils/hashString');
-const { log } = require('./utils/log');
+const { log, setGlobalLogFilePathMut } = require('./utils/log');
+const { createEmptyFile } = require('./utils/createEmptyFile');
 
 // File paths
 const CONFIG_FILE_PATH = path.join(__dirname, 'config.json');
-const SESSION_SERIES_DIRECTORY_PATH = path.join(__dirname, 'sessionseries');
 const OUTPUT_DIRECTORY_PATH = path.join(__dirname, 'output');
+const OUTPUT_SESSION_SERIES_DIRECTORY_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'sessionseries');
+const OUTPUT_SEGMENTS_DIRECTORY_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'segments');
+const OUTPUT_LOG_FILE_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'log.txt');
 
 // Parameters controlling retry backoff
 const RETRY_BACKOFF_MIN_SECONDS = 1;
@@ -95,14 +97,14 @@ function secondsToMilliseconds(seconds) {
  * @param {string} segmentIdentifier
  */
 function getSegmentIndexFilePath(segmentIdentifier) {
-  return path.join(OUTPUT_DIRECTORY_PATH, segmentIdentifier, 'index.txt');
+  return path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, segmentIdentifier, 'index.txt');
 }
 
 /**
  * @param {string} sessionSeriesIdHash
  */
 function getSessionSeriesFilePath(sessionSeriesIdHash) {
-  return path.join(SESSION_SERIES_DIRECTORY_PATH, `${sessionSeriesIdHash}.json`);
+  return path.join(OUTPUT_SESSION_SERIES_DIRECTORY_PATH, `${sessionSeriesIdHash}.json`);
 }
 
 /**
@@ -110,7 +112,7 @@ function getSessionSeriesFilePath(sessionSeriesIdHash) {
  * @param {string} scheduledSessionIdHash
  */
 function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) {
-  return path.join(OUTPUT_DIRECTORY_PATH, segmentIdentifier, `${scheduledSessionIdHash}.json`);
+  return path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, segmentIdentifier, `${scheduledSessionIdHash}.json`);
 }
 
 /**
@@ -130,15 +132,27 @@ async function readJsonNullIfNotExists(filePath) {
 /**
  * @param {Segment[]} segments
  */
-async function createSegmentDirectories(segments) {
-  // Create segment directories;
+async function emptyOrMakeOutputDirectories(segments) {
+  // ## Create or empty root output/ directory
+  if (await fs.pathExists(OUTPUT_DIRECTORY_PATH)) {
+    await fs.emptyDir(OUTPUT_DIRECTORY_PATH);
+  } else {
+    await fsPromises.mkdir(OUTPUT_DIRECTORY_PATH, { recursive: true });
+  }
+  // ## Create SessionSeries directory
+  await fsPromises.mkdir(OUTPUT_SESSION_SERIES_DIRECTORY_PATH);
+  // ## Create segment directories
+  await fsPromises.mkdir(OUTPUT_SEGMENTS_DIRECTORY_PATH);
   for (const { identifier } of segments) {
-    const segmentDirectoryPath = path.join(OUTPUT_DIRECTORY_PATH, identifier);
-    await emptyOrMakeDirectory(segmentDirectoryPath);
+    const segmentDirectoryPath = path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, identifier);
+    await fsPromises.mkdir(segmentDirectoryPath);
 
     // Create index file
-    await fsPromises.writeFile(getSegmentIndexFilePath(identifier), '');
+    await createEmptyFile(getSegmentIndexFilePath(identifier));
   }
+  // ## Create log.txt file
+  await createEmptyFile(OUTPUT_LOG_FILE_PATH);
+  setGlobalLogFilePathMut(OUTPUT_LOG_FILE_PATH);
 }
 
 /**
@@ -166,7 +180,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
       if (isExistingScheduledSession) {
         if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
           // Hash clash
-          log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
+          await log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
           continue;
         }
       }
@@ -273,7 +287,7 @@ async function processSessionSeriesItems(items, segments) {
       if (existingSessionSeries) {
         // Hash clash
         if (existingSessionSeries.id !== item.id) {
-          log('warn', `Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
+          await log('warn', `Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
           return;
         }
       // If the IDs are the same, then no need to do anything
@@ -304,21 +318,21 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
       timeMultiple: RETRY_BACKOFF_EXPONENTIATION_RATE,
       numOfAttempts: 10,
       delayFirstAttempt: false,
-      retry(error) {
+      async retry(error) {
         if (error instanceof Http404Error) {
-          log('error', `ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
+          await log('error', `ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
           process.exit(1);
         }
         const loggableError = (error && error.isAxiosError)
           ? loggableAxiosError(error)
           : error;
-        log('warn', `WARN: Retrying [page: "${url}"] due to error:`, loggableError);
+        await log('warn', `WARN: Retrying [page: "${url}"] due to error:`, loggableError);
         return true;
       },
     });
   } catch (error) {
-    log('error', `ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
-    log('error', error);
+    await log('error', `ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
+    await log('error', error);
     process.exit(1);
   }
 }
@@ -381,7 +395,7 @@ async function processScheduledSessionItems(items) {
 
     // Check SessionSeries.id and ScheduledSession.superEvent match in case there has been some hash clash
     if (scheduledSessionItem.data.superEvent !== sessionSeries.id) {
-      log('warn', `ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
+      await log('warn', `ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
       return;
     }
 
@@ -391,31 +405,25 @@ async function processScheduledSessionItems(items) {
 }
 
 (async () => {
-  log('info', 'geoSegment() - starting..');
-
   // Load config file into memory
   const { firehoseBaseUrl, firehoseApiKey, segments } = await fs.readJson(CONFIG_FILE_PATH);
 
-  // Create SessionSeries directory
-  await emptyOrMakeDirectory(SESSION_SERIES_DIRECTORY_PATH);
+  // Create output/ directories
+  await emptyOrMakeOutputDirectories(segments);
 
-  // Create output directory
-  await emptyOrMakeDirectory(OUTPUT_DIRECTORY_PATH);
-
-  // Create Segment directories
-  await createSegmentDirectories(segments);
+  await log('info', 'geoSegment() - starting..');
 
   // Download and process SessionSeries
   const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
   // const sessionSeriesFirehoseUrl = 'https://firehose.imin.co/firehose/standard/session-series?afterChangeNumber=35431312&limit=500';
-  log('info', 'geoSegment() - downloading SessionSeries feed..');
+  await log('info', 'geoSegment() - downloading SessionSeries feed..');
   await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
-  log('info', 'geoSegment() - downloaded SessionSeries feed');
+  await log('info', 'geoSegment() - downloaded SessionSeries feed');
 
   // Download and process ScheduledSessions into segment directories
   const scheduledSessionFirehoseUrl = `${firehoseBaseUrl}scheduled-sessions`;
   // const scheduledSessionFirehoseUrl = 'https://firehose.imin.co/firehose/standard/scheduled-sessions?afterChangeNumber=35699502&limit=500';
-  log('info', 'geoSegment() - downloading ScheduledSession feed..');
+  await log('info', 'geoSegment() - downloading ScheduledSession feed..');
   await downloadFirehosePageAndProcess(scheduledSessionFirehoseUrl, firehoseApiKey, processScheduledSessionItems, segments);
-  log('info', 'geoSegment() - downloaded ScheduledSession feed. Finished');
+  await log('info', 'geoSegment() - downloaded ScheduledSession feed. Finished');
 })();
