@@ -19,13 +19,19 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 You will need Node.js ^12.18.2 (LTS as of July 2020)
 
-1. Edit the `geoSegment/config.js` file to your desired segments. Radius is in kilometres.
-2. `npm install`
-3. Run script
+1. Create a `geoSegment/config.json` file by copying `geoSegment/config.example.json` i.e.
 
-  ```sh
-  node geoSegment/geoSegment.js
-  ```
+    ```sh
+    cp geoSegment/config.example.json geoSegment/config.json
+    ```
+2. Edit the `geoSegment/config.js` file to your desired segments. Radius is in kilometres.
+3. `npm install`
+4. Run script
+
+    ```sh
+    node geoSegment/geoSegment.js
+    ```
+
 The outputs will be in the `geoSegment/output` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` 
 that contains the filename of each ScheduledSession in that folder.
 
