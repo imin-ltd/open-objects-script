@@ -24,7 +24,7 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
     ```sh
     cp geoSegment/config.example.json geoSegment/config.json
     ```
-2. Edit the `geoSegment/config.js` file to your desired segments. Radius is in kilometres.
+2. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
 3. `npm install`
 4. Run script
 
