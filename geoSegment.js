@@ -109,14 +109,13 @@ function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) 
  */
 async function createSegmentDirectories(segments) {
   // Create segment directories;
-  segments.map((segment) => segment.identifier)
-    .map(async (segmentIdentifier) => {
-      const segmentDirectoryPath = `${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}`;
-      await emptyOrMakeDirectory(segmentDirectoryPath);
+  for (const { identifier } of segments) {
+    const segmentDirectoryPath = `${OUTPUT_DIRECTORY_PATH}/${identifier}`;
+    await emptyOrMakeDirectory(segmentDirectoryPath);
 
-      // Create index file
-      await fsPromises.writeFile(getSegmentIndexFilePath(segmentIdentifier), '');
-    });
+    // Create index file
+    await fsPromises.writeFile(getSegmentIndexFilePath(identifier), '');
+  }
 }
 
 /**
