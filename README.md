@@ -19,7 +19,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 You will need Node.js ^12.18.2 (LTS as of July 2020)
 
-1. Edit the `geoSegment/config.js` file to your desired segments
+1. Edit the `geoSegment/config.js` file to your desired segments. Radius is in kilometres.
 2. `npm install`
 3. Run script
 
