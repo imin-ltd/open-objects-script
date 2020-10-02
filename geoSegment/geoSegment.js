@@ -5,6 +5,7 @@ const fsPromises = require('fs').promises;
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
+const { performance } = require('perf_hooks');
 
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
 const { getFirehosePage } = require('./utils/getFirehosePage');
@@ -14,6 +15,8 @@ const { Http404Error } = require('./utils/errors');
 const { hashString } = require('./utils/hashString');
 const { log, setGlobalLogFilePathMut } = require('./utils/log');
 const { createEmptyFile } = require('./utils/createEmptyFile');
+
+const scriptStartTime = performance.now();
 
 // File paths
 const CONFIG_FILE_PATH = path.join(__dirname, 'config.json');
@@ -127,6 +130,13 @@ async function readJsonNullIfNotExists(filePath) {
     }
     throw error;
   }
+}
+
+function logExitTime() {
+  const scriptEndTime = performance.now();
+  const totalTimeMillis = scriptEndTime - scriptStartTime;
+  const totalTimeSeconds = totalTimeMillis / 1000;
+  log('info', `Script run time: ${totalTimeSeconds.toFixed(2)} seconds`);
 }
 
 /**
@@ -320,19 +330,21 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
       delayFirstAttempt: false,
       async retry(error) {
         if (error instanceof Http404Error) {
-          await log('error', `ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
+          await log('error', `URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
+          logExitTime();
           process.exit(1);
         }
         const loggableError = (error && error.isAxiosError)
           ? loggableAxiosError(error)
           : error;
-        await log('warn', `WARN: Retrying [page: "${url}"] due to error:`, loggableError);
+        await log('warn', `Retrying [page: "${url}"] due to error:`, loggableError);
         return true;
       },
     });
   } catch (error) {
-    await log('error', `ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
+    await log('error', `Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
     await log('error', error);
+    logExitTime();
     process.exit(1);
   }
 }
@@ -415,15 +427,19 @@ async function processScheduledSessionItems(items) {
 
   // Download and process SessionSeries
   const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
-  // const sessionSeriesFirehoseUrl = 'https://firehose.imin.co/firehose/standard/session-series?afterChangeNumber=35431312&limit=500';
   await log('info', 'geoSegment() - downloading SessionSeries feed..');
   await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
   await log('info', 'geoSegment() - downloaded SessionSeries feed');
 
   // Download and process ScheduledSessions into segment directories
   const scheduledSessionFirehoseUrl = `${firehoseBaseUrl}scheduled-sessions`;
-  // const scheduledSessionFirehoseUrl = 'https://firehose.imin.co/firehose/standard/scheduled-sessions?afterChangeNumber=35699502&limit=500';
   await log('info', 'geoSegment() - downloading ScheduledSession feed..');
   await downloadFirehosePageAndProcess(scheduledSessionFirehoseUrl, firehoseApiKey, processScheduledSessionItems, segments);
   await log('info', 'geoSegment() - downloaded ScheduledSession feed. Finished');
+  logExitTime();
 })();
+
+process.on('uncaughtException', (error) => {
+  log('error', 'Fatal exception', error);
+  logExitTime();
+});

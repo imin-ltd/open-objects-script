@@ -40,8 +40,6 @@ async function log(level, ...messages) {
   // ## Log to file
   if (logFilePath) {
     await fs.appendFile(logFilePath, `${completeLogMsg}\r\n`);
-  } else {
-    throw new Error('Log file path has not been set');
   }
 }
 
