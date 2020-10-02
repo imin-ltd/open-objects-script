@@ -136,7 +136,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
 
     // Check if the ScheduledSession already exists
-    if (await fs.pathExists(scheduledSessionFilePath)) {
+    {
       const existingScheduledSession = await fs.readJson(scheduledSessionFilePath, { throws: false });
       if (existingScheduledSession) {
         if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
@@ -246,15 +246,17 @@ async function processSessionSeriesItems(items, segments) {
 
     const sessionSeriesIdHash = hashString(item.id);
     const sessionSeriesFilePath = getSessionSeriesFilePath(sessionSeriesIdHash);
-    if (await fs.pathExists(sessionSeriesFilePath)) {
+    {
       // If the path already exists, then either the SessionSeries has already been processed and saved, or there's a hash clash
-      const sessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
-      // Hash clash
-      if (sessionSeries.id !== item.id) {
-        console.warn(`Already downloaded SessionSeries:${sessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
-        return;
-      }
+      const existingSessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
+      if (existingSessionSeries) {
+        // Hash clash
+        if (existingSessionSeries && existingSessionSeries.id !== item.id) {
+          console.warn(`Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
+          return;
+        }
       // If the IDs are the same, then no need to do anything
+      }
     }
     await fs.writeJson(sessionSeriesFilePath, sessionSeriesDataWithCorrectedEventSchedules);
 
@@ -338,11 +340,8 @@ async function processScheduledSessionItems(items) {
     const sessionSeriesFilePath = getSessionSeriesFilePath(scheduledSessionSuperEventIdHash);
 
     // Get SessionSeries
-    if (!(await fs.pathExists(sessionSeriesFilePath))) {
-      return;
-    }
     const sessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
-    if (!sessionSeries) {
+    if (!sessionSeries) { // File doesn't exist
       return;
     }
 
