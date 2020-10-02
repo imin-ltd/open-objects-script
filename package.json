@@ -4,7 +4,7 @@
   "description": "",
   "main": "walkRpde.js",
   "scripts": {
-    "lint": "eslint geoSegment.js",
+    "lint": "eslint geoSegment/**/*.js",
     "test": "npm run lint && tsc"
   },
   "repository": {

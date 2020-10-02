@@ -1,9 +1,11 @@
+const path = require('path');
 const { backOff } = require('exponential-backoff');
 const fsPromises = require('fs').promises;
 const fs = require('fs-extra');
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
+const util = require('util');
 
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
 const { getFirehosePage } = require('./utils/getFirehosePage');
@@ -14,9 +16,9 @@ const { Http404Error } = require('./utils/errors');
 const { hashString } = require('./utils/hashString');
 
 // File paths
-const CONFIG_FILE_PATH = './config.json';
-const SESSION_SERIES_DIRECTORY_PATH = './sessionseries';
-const OUTPUT_DIRECTORY_PATH = './output';
+const CONFIG_FILE_PATH = path.join(__dirname, 'config.json');
+const SESSION_SERIES_DIRECTORY_PATH = path.join(__dirname, 'sessionseries');
+const OUTPUT_DIRECTORY_PATH = path.join(__dirname, 'output');
 
 // Parameters controlling retry backoff
 const RETRY_BACKOFF_MIN_SECONDS = 1;
@@ -90,17 +92,37 @@ function secondsToMilliseconds(seconds) {
 }
 
 /**
+ * @param {'info' | 'warn' | 'error'} level
+ * @param  {...unknown} messages
+ */
+function log(level, ...messages) {
+  /** @type {string[]} */
+  const completeLogMsgParts = [
+    `[${moment.tz('utc').toISOString()}]`, // timestamp
+    `[${level}]`, // log level
+    ...messages.map((message) => {
+      if (typeof message === 'string') {
+        return message;
+      }
+      return util.inspect(message, false, 10);
+    }),
+  ];
+  const completeLogMsg = completeLogMsgParts.join(' ');
+  console[level](completeLogMsg);
+}
+
+/**
  * @param {string} segmentIdentifier
  */
 function getSegmentIndexFilePath(segmentIdentifier) {
-  return `${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/index.txt`;
+  return path.join(OUTPUT_DIRECTORY_PATH, segmentIdentifier, 'index.txt');
 }
 
 /**
  * @param {string} sessionSeriesIdHash
  */
 function getSessionSeriesFilePath(sessionSeriesIdHash) {
-  return `${SESSION_SERIES_DIRECTORY_PATH}/${sessionSeriesIdHash}.json`;
+  return path.join(SESSION_SERIES_DIRECTORY_PATH, `${sessionSeriesIdHash}.json`);
 }
 
 /**
@@ -108,7 +130,7 @@ function getSessionSeriesFilePath(sessionSeriesIdHash) {
  * @param {string} scheduledSessionIdHash
  */
 function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) {
-  return `${OUTPUT_DIRECTORY_PATH}/${segmentIdentifier}/${scheduledSessionIdHash}.json`;
+  return path.join(OUTPUT_DIRECTORY_PATH, segmentIdentifier, `${scheduledSessionIdHash}.json`);
 }
 
 /**
@@ -117,7 +139,7 @@ function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) 
 async function createSegmentDirectories(segments) {
   // Create segment directories;
   for (const { identifier } of segments) {
-    const segmentDirectoryPath = `${OUTPUT_DIRECTORY_PATH}/${identifier}`;
+    const segmentDirectoryPath = path.join(OUTPUT_DIRECTORY_PATH, identifier);
     await emptyOrMakeDirectory(segmentDirectoryPath);
 
     // Create index file
@@ -147,7 +169,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
       if (existingScheduledSession) {
         if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
           // Hash clash
-          console.warn(`Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
+          log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
           continue;
         } else {
           // existingScheduledSession and linkedScheduledSessionData are the same and it has already been processed and saved, so do nothing
@@ -258,7 +280,7 @@ async function processSessionSeriesItems(items, segments) {
       if (existingSessionSeries) {
         // Hash clash
         if (existingSessionSeries.id !== item.id) {
-          console.warn(`Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
+          log('warn', `Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
           return;
         }
       // If the IDs are the same, then no need to do anything
@@ -291,19 +313,19 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
       delayFirstAttempt: false,
       retry(error) {
         if (error instanceof Http404Error) {
-          console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
+          log('error', `ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
           process.exit(1);
         }
         const loggableError = (error && error.isAxiosError)
           ? loggableAxiosError(error)
           : error;
-        console.warn(`WARN: Retrying [page: "${url}"] due to error:`, loggableError);
+        log('warn', `WARN: Retrying [page: "${url}"] due to error:`, loggableError);
         return true;
       },
     });
   } catch (error) {
-    console.error(`ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
-    console.error(error);
+    log('error', `ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
+    log('error', error);
     process.exit(1);
   }
 }
@@ -366,7 +388,7 @@ async function processScheduledSessionItems(items) {
 
     // Check SessionSeries.id and ScheduledSession.superEvent match in case there has been some hash clash
     if (scheduledSessionItem.data.superEvent !== sessionSeries.id) {
-      console.warn(`ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
+      log('warn', `ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
       return;
     }
 
@@ -376,7 +398,7 @@ async function processScheduledSessionItems(items) {
 }
 
 (async () => {
-  console.log('geoSegment() - starting..');
+  log('info', 'geoSegment() - starting..');
 
   // Load config file into memory
   const { firehoseBaseUrl, firehoseApiKey, segments } = await fs.readJson(CONFIG_FILE_PATH);
@@ -398,5 +420,5 @@ async function processScheduledSessionItems(items) {
   const scheduledSessionFirehoseUrl = `${firehoseBaseUrl}scheduled-sessions`;
   await downloadFirehosePageAndProcess(scheduledSessionFirehoseUrl, firehoseApiKey, processScheduledSessionItems, segments);
 
-  console.log('geoSegment() - finished');
+  log('info', 'geoSegment() - finished');
 })();
