@@ -11,6 +11,8 @@ module.exports = {
   },
   rules: {
     'max-len': 'off',
+    'no-return-await': 'off',
+    'no-console': 'off',
     'no-await-in-loop': 0,
     'no-restricted-syntax': 0,
     'no-continue': 0,

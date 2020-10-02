@@ -1,4 +1,4 @@
-/* eslint-disable no-console */
+const { backOff } = require('exponential-backoff');
 const fsPromises = require('fs').promises;
 const fs = require('fs-extra');
 const geolib = require('geolib');
@@ -19,8 +19,8 @@ const SESSION_SERIES_DIRECTORY_PATH = './sessionseries';
 const OUTPUT_DIRECTORY_PATH = './output';
 
 // Parameters controlling retry backoff
-const RETRY_BACKOFF_MIN = 1;
-const RETRY_BACKOFF_MAX = 1024; // ~ 17 mins
+const RETRY_BACKOFF_MIN_SECONDS = 1;
+const RETRY_BACKOFF_MAX_SECONDS = 1024; // ~ 17 mins
 const RETRY_BACKOFF_EXPONENTIATION_RATE = 2;
 const MIN_REQUEST_DELAY_SECONDS = 0.1;
 
@@ -81,6 +81,13 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
  *  identifier: string
  * }} Segment
  */
+
+/**
+ * @param {number} seconds
+ */
+function secondsToMilliseconds(seconds) {
+  return seconds * 1000;
+}
 
 /**
  * @param {string} segmentIdentifier
@@ -250,7 +257,7 @@ async function processSessionSeriesItems(items, segments) {
       const existingSessionSeries = await fs.readJson(sessionSeriesFilePath, { throws: false });
       if (existingSessionSeries) {
         // Hash clash
-        if (existingSessionSeries && existingSessionSeries.id !== item.id) {
+        if (existingSessionSeries.id !== item.id) {
           console.warn(`Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
           return;
         }
@@ -267,6 +274,41 @@ async function processSessionSeriesItems(items, segments) {
 }
 
 /**
+ * @param {string} url
+ * @param {string} firehoseApiKey
+ */
+async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // eslint-disable-line consistent-return
+  // the consistent-return eslint rule does not seem to understand that a
+  // process.exit() call cannot be followed by any sort of return.
+  try {
+    return await backOff(async () => (
+      await getFirehosePage(url, firehoseApiKey)
+    ), {
+      maxDelay: secondsToMilliseconds(RETRY_BACKOFF_MAX_SECONDS),
+      startingDelay: secondsToMilliseconds(RETRY_BACKOFF_MIN_SECONDS),
+      timeMultiple: RETRY_BACKOFF_EXPONENTIATION_RATE,
+      numOfAttempts: 10,
+      delayFirstAttempt: false,
+      retry(error) {
+        if (error instanceof Http404Error) {
+          console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
+          process.exit(1);
+        }
+        const loggableError = (error && error.isAxiosError)
+          ? loggableAxiosError(error)
+          : error;
+        console.warn(`WARN: Retrying [page: "${url}"] due to error:`, loggableError);
+        return true;
+      },
+    });
+  } catch (error) {
+    console.error(`ERROR: Cannot download Firehose pages [at page "${url}"], backoff limit reached, terminating script`);
+    console.error(error);
+    process.exit(1);
+  }
+}
+
+/**
  * @typedef {ScheduledSessionItem[]|SessionSeriesItem[]} Items
  * @param {string} firehosePageUrl
  * @param {string} firehoseApiKey
@@ -276,29 +318,8 @@ async function processSessionSeriesItems(items, segments) {
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
   // Get page from Firehose
   let nextUrl = firehosePageUrl;
-  let backoffTimeInSeconds = RETRY_BACKOFF_MIN;
   while (true) {
-    let nextNextUrl;
-    let items;
-    try {
-      ({ nextNextUrl, items } = await getFirehosePage(nextUrl, firehoseApiKey));
-    } catch (error) {
-      if (error instanceof Http404Error) {
-        console.error(`ERROR: URL ("${error.url}") not found. Please check the value for <rpde-endpoint>.`);
-        process.exit(1);
-      }
-      const loggableError = (error && error.isAxiosError)
-        ? loggableAxiosError(error)
-        : error;
-      console.warn(`WARN: Retrying [page: "${nextUrl}"] due to error:`, loggableError);
-      if (backoffTimeInSeconds > RETRY_BACKOFF_MAX) {
-        console.error('ERROR: Cannot download Firehose pages, backoff limit reached, terminating script');
-        process.exit(1);
-      }
-      await wait(backoffTimeInSeconds * 1000);
-      backoffTimeInSeconds *= RETRY_BACKOFF_EXPONENTIATION_RATE;
-      continue;
-    }
+    const { nextNextUrl, items } = await getFirehosePageWithExponentialBackoff(nextUrl, firehoseApiKey);
 
     // Process items
     await processItemsFn(items, segments);
@@ -310,7 +331,6 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 
     // If we haven't reached the end of the feed, carry on
     nextUrl = nextNextUrl;
-    backoffTimeInSeconds = RETRY_BACKOFF_MIN;
     await wait(MIN_REQUEST_DELAY_SECONDS * 1000);
   }
 }
