@@ -185,13 +185,13 @@ function mergeToModel(model, dataInstance) {
     if (Array.isArray(source) && !Array.isArray(target)) return source;
 
     // If an array of strings, combine and dedup them
-    if ((target.length === 0 || target.every((s) => typeof s === 'string'))
-      && (source.length === 0 || source.every((s) => typeof s === 'string'))) {
+    if (target.every((s) => typeof s === 'string')
+      && source.every((s) => typeof s === 'string')) {
       return Array.from(new Set([].concat(target, source)));
     }
     // If an array of objects, merge them
-    if ((target.length === 0 || target.every((s) => typeof s === 'object'))
-      && (source.length === 0 || source.every((s) => typeof s === 'object'))) {
+    if (target.every((s) => typeof s === 'object')
+      && source.every((s) => typeof s === 'object')) {
       let destination = Array.isArray(target) && source.length > 0 ? target[0] : {};
       source.forEach((item) => {
         destination = mergeToModel(destination, item);
