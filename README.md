@@ -26,11 +26,7 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
     ```
 2. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
 3. `npm install`
-4. Run script
-
-    ```sh
-    node geoSegment/geoSegment.js
-    ```
+4. `npm run geoSegment`
 
 The output segments will be in the `geoSegment/output/segments` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` that contains the filename of each ScheduledSession in that folder.
 

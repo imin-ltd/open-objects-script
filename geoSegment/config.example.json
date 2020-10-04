@@ -1,7 +1,25 @@
 {
   "firehoseBaseUrl": "https://firehose.imin.co/firehose/standard/",
-  "firehoseApiKey": "",
+  "firehoseApiKey": "REPLACE WITH API KEY",
   "segments": [
+    {
+      "identifier": "westminster",
+      "latitude": 51.514684,
+      "longitude": -0.157244,
+      "radius": 6
+    },
+    {
+      "identifier": "slough",
+      "latitude": 51.515348,
+      "longitude": -0.593816,
+      "radius": 11
+    },
+    {
+      "identifier": "staffordshire",
+      "latitude": 52.852856,
+      "longitude": -2.033267,
+      "radius": 65
+    },
     {
       "identifier": "example",
       "latitude": 51.4771457,

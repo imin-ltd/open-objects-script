@@ -5,6 +5,7 @@ const fsPromises = require('fs').promises;
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
+const merge = require('deepmerge');
 const { performance } = require('perf_hooks');
 
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
@@ -166,6 +167,58 @@ async function emptyOrMakeOutputDirectories(segments) {
 }
 
 /**
+ * @param {object} model
+ * @param {object} dataInstance
+ */
+function mergeToModel(model, dataInstance) {
+  // If both are not objects, the object is preferred
+  if (typeof model === 'object' && typeof dataInstance !== 'object') return model;
+  if (typeof dataInstance === 'object' && typeof model !== 'object') return dataInstance;
+
+  // If both are not arrays, the array is preferred
+  if (Array.isArray(model) && !Array.isArray(dataInstance)) return model;
+  if (Array.isArray(dataInstance) && !Array.isArray(model)) return dataInstance;
+
+  const combineMerge = (target, source) => {
+    // If both are not arrays, the array is preferred
+    if (Array.isArray(target) && !Array.isArray(source)) return target;
+    if (Array.isArray(source) && !Array.isArray(target)) return source;
+
+    // If an array of strings, combine and dedup them
+    if ((target.length === 0 || target.every((s) => typeof s === 'string'))
+      && (source.length === 0 || source.every((s) => typeof s === 'string'))) {
+      return Array.from(new Set([].concat(target, source)));
+    }
+    // If an array of objects, merge them
+    if ((target.length === 0 || target.every((s) => typeof s === 'object'))
+      && (source.length === 0 || source.every((s) => typeof s === 'object'))) {
+      let destination = Array.isArray(target) && source.length > 0 ? target[0] : {};
+      source.forEach((item) => {
+        destination = mergeToModel(destination, item);
+      });
+      return [destination];
+    }
+    // Otherwise, the data doesn't fit with schema.org, so just ignore this data, it's probably broken
+    return source;
+  };
+
+  return merge(model, dataInstance, { arrayMerge: combineMerge });
+}
+
+/**
+ * @param {string} modelFilePath
+ * @param {object} data
+ */
+async function mergeIntoModelExample(modelFilePath, data) {
+  let existingModel = await readJsonNullIfNotExists(modelFilePath);
+  if (!existingModel) {
+    existingModel = {};
+  }
+  const newModel = mergeToModel(existingModel, data);
+  await fs.writeJson(modelFilePath, newModel);
+}
+
+/**
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
  */
@@ -180,6 +233,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
   for (const segmentIdentifier of sessionSeries['imin:segment']) {
     const scheduledSessionIdHash = hashString(linkedScheduledSessionData.id);
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
+    const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
     // Check if the ScheduledSession already exists
     /** @type {boolean} */
@@ -197,6 +251,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     }
     // ScheduledSession does not already exist, so save it
     await fs.writeJson(scheduledSessionFilePath, linkedScheduledSessionData);
+    await mergeIntoModelExample(modelFilePath, linkedScheduledSessionData);
 
     // Write to the index file if this ScheduledSession did not already exist
     if (!isExistingScheduledSession) {
