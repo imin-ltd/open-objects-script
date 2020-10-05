@@ -426,7 +426,7 @@ async function processScheduledSessionItems(items) {
   await log('info', 'geoSegment() - starting..');
 
   // Download and process SessionSeries
-  const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series?afterChangeNumber=56538437&limit=500`;
+  const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
   await log('info', 'geoSegment() - downloading SessionSeries feed..');
   await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
   await log('info', 'geoSegment() - downloaded SessionSeries feed');
