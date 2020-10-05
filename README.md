@@ -14,7 +14,32 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-## How to use
+## geoSegment.js
+### How to run
+
+You will need Node.js ^12.18.2 (LTS as of July 2020)
+
+1. Create a `geoSegment/config.json` file by copying `geoSegment/config.example.json` i.e.
+
+    ```sh
+    cp geoSegment/config.example.json geoSegment/config.json
+    ```
+2. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
+3. `npm install`
+4. `npm run geoSegment`
+
+The output segments will be in the `geoSegment/output/segments` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` that contains the filename of each ScheduledSession in that folder.
+
+Additionally, a log will be saved to `geoSegment/output/log.txt`.
+
+### Known Limitations
+
+- SHA-1 hashes of IDs are used as filenames for both SessionSeries and ScheduledSessions. It is very unlikely that these hashes will clash, but if they do
+the newer file will be dropped.
+- ScheduledSession's location is not used for geo-segmenting - only the SessionSeries's
+
+## walkRpde.js
+### How to use
 
 **N.B.** the `output-file-path` directory **will be removed** when this script is run,
 so take care not to set it to e.g. `/`. The directory should only hold files
@@ -45,3 +70,5 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
   There's also been some performance measurements added to this script. These last two scripts were very slow.
 - `walkRpde.js`
   A script that copies the functionality of `reference/oo-walk-rpde` but in node.js. Because JSON is only parsed once and large amounts of memory are not constantly copied, this is 100s of times faster than the bash scripts.
+- `geoSegment.js`
+  Script that downloads the Firehose feeds and segments items according to geographical criteria.
