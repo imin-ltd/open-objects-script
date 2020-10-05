@@ -14,6 +14,7 @@ async function getFirehosePage(pageUrl, apiKey) {
   const rpdePage = await axios(pageUrl, {
     validateStatus: (status) => (status >= 200 && status < 300) || status === 404,
     // HTTP 404 is allowed so that we can assign special treatment
+    timeout: 30000,
     headers,
   });
   if (rpdePage.status === 404) {
