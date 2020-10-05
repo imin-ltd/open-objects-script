@@ -5,7 +5,6 @@ const fsPromises = require('fs').promises;
 const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
-const merge = require('deepmerge');
 const { performance } = require('perf_hooks');
 
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
@@ -16,6 +15,8 @@ const { Http404Error } = require('./utils/errors');
 const { hashString } = require('./utils/hashString');
 const { log, setGlobalLogFilePathMut } = require('./utils/log');
 const { createEmptyFile } = require('./utils/createEmptyFile');
+const { mergeIntoModelExample } = require('./utils/mergeIntoModelExample');
+const { readJsonNullIfNotExists } = require('./utils/readJsonNullIfNotExists');
 
 const scriptStartTime = performance.now();
 
@@ -42,6 +43,9 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
   endTime: Joi.string().required(),
   idTemplate: Joi.string().required(),
 });
+
+// Time window
+const WEEKS_IN_FUTURE_TIME_WINDOW = 8;
 
 /**
  * @typedef {import('axios').AxiosError} AxiosError
@@ -119,20 +123,6 @@ function getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash) 
   return path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, segmentIdentifier, `${scheduledSessionIdHash}.json`);
 }
 
-/**
- * @param {string} filePath
- */
-async function readJsonNullIfNotExists(filePath) {
-  try {
-    return await fs.readJson(filePath);
-  } catch (error) {
-    if (error && error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-}
-
 function logExitTime() {
   const scriptEndTime = performance.now();
   const totalTimeMillis = scriptEndTime - scriptStartTime;
@@ -164,58 +154,6 @@ async function emptyOrMakeOutputDirectories(segments) {
   // ## Create log.txt file
   await createEmptyFile(OUTPUT_LOG_FILE_PATH);
   setGlobalLogFilePathMut(OUTPUT_LOG_FILE_PATH);
-}
-
-/**
- * @param {object} model
- * @param {object} dataInstance
- */
-function mergeToModel(model, dataInstance) {
-  // If both are not objects, the object is preferred
-  if (typeof model === 'object' && typeof dataInstance !== 'object') return model;
-  if (typeof dataInstance === 'object' && typeof model !== 'object') return dataInstance;
-
-  // If both are not arrays, the array is preferred
-  if (Array.isArray(model) && !Array.isArray(dataInstance)) return model;
-  if (Array.isArray(dataInstance) && !Array.isArray(model)) return dataInstance;
-
-  const combineMerge = (target, source) => {
-    // If both are not arrays, the array is preferred
-    if (Array.isArray(target) && !Array.isArray(source)) return target;
-    if (Array.isArray(source) && !Array.isArray(target)) return source;
-
-    // If an array of strings, combine and dedup them
-    if (target.every((s) => typeof s === 'string')
-      && source.every((s) => typeof s === 'string')) {
-      return Array.from(new Set([].concat(target, source)));
-    }
-    // If an array of objects, merge them
-    if (target.every((s) => typeof s === 'object')
-      && source.every((s) => typeof s === 'object')) {
-      let destination = Array.isArray(target) && source.length > 0 ? target[0] : {};
-      source.forEach((item) => {
-        destination = mergeToModel(destination, item);
-      });
-      return [destination];
-    }
-    // Otherwise, the data doesn't fit with schema.org, so just ignore this data, it's probably broken
-    return source;
-  };
-
-  return merge(model, dataInstance, { arrayMerge: combineMerge });
-}
-
-/**
- * @param {string} modelFilePath
- * @param {object} data
- */
-async function mergeIntoModelExample(modelFilePath, data) {
-  let existingModel = await readJsonNullIfNotExists(modelFilePath);
-  if (!existingModel) {
-    existingModel = {};
-  }
-  const newModel = mergeToModel(existingModel, data);
-  await fs.writeJson(modelFilePath, newModel);
 }
 
 /**
@@ -251,6 +189,8 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     }
     // ScheduledSession does not already exist, so save it
     await fs.writeJson(scheduledSessionFilePath, linkedScheduledSessionData);
+
+    // Merge ScheduledSession into model.json and save
     await mergeIntoModelExample(modelFilePath, linkedScheduledSessionData);
 
     // Write to the index file if this ScheduledSession did not already exist
@@ -269,11 +209,11 @@ async function processSessionSeriesItems(items, segments) {
   for (const item of items) {
     // Filter deleted SessionSeries
     if (item.state === 'deleted') {
-      return;
+      continue;
     }
     // If for some reason, the SessionSeries doesn't have an ID, don't process it.
     if (!item.id) {
-      return;
+      continue;
     }
 
     // Filter virtual sessions
@@ -283,7 +223,7 @@ async function processSessionSeriesItems(items, segments) {
     } else if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) {
       sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
     } else {
-      return;
+      continue;
     }
 
     /** @type {SessionSeriesData} */
@@ -305,7 +245,7 @@ async function processSessionSeriesItems(items, segments) {
     }
     // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
     if (sessionSeriesData['imin:segment'].length === 0) {
-      return;
+      continue;
     }
 
     // Validate Schedules and generate ScheduledSessions if needed
@@ -353,7 +293,7 @@ async function processSessionSeriesItems(items, segments) {
         // Hash clash
         if (existingSessionSeries.id !== item.id) {
           await log('warn', `Already downloaded SessionSeries:${existingSessionSeries.id} and newly received SessionSeries: ${item.id} are not the same despite having the same hash: ${sessionSeriesIdHash}`);
-          return;
+          continue;
         }
       // If the IDs are the same, then no need to do anything
       }
@@ -408,7 +348,7 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
  * @typedef {ScheduledSessionRpdeItem[]|SessionSeriesRpdeItem[]} Items
  * @param {string} firehosePageUrl
  * @param {string} firehoseApiKey
- * @param {(items: Items, segments: Segment[]) => void} processItemsFn
+ * @param {(items: Items, segments: Segment[]) => Promise<void>} processItemsFn
  * @param {Segment[]} segments
  */
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
@@ -438,16 +378,21 @@ async function processScheduledSessionItems(items) {
   for (const scheduledSessionItem of items) {
     // Filter deleted ScheduledSessions
     if (scheduledSessionItem.state === 'deleted') {
-      return;
+      continue;
     }
     // If for some reason, the ScheduledSession doesn't have an ID, don't process it.
     if (!scheduledSessionItem.id) {
-      return;
+      continue;
     }
 
     // Filter ScheduledSessions in the past
     if (!scheduledSessionItem.data.startDate || moment(scheduledSessionItem.data.startDate).isBefore(moment())) {
-      return;
+      continue;
+    }
+
+    // Filter ScheduledSession not in future time window
+    if (moment(scheduledSessionItem.data.startDate).isAfter(moment().add(WEEKS_IN_FUTURE_TIME_WINDOW, 'weeks'))) {
+      continue;
     }
 
     // Does ScheduledSession have downloaded superEvent?
@@ -457,13 +402,13 @@ async function processScheduledSessionItems(items) {
     // Get SessionSeries
     const sessionSeries = await readJsonNullIfNotExists(sessionSeriesFilePath);
     if (!sessionSeries) { // File doesn't exist
-      return;
+      continue;
     }
 
     // Check SessionSeries.id and ScheduledSession.superEvent match in case there has been some hash clash
     if (scheduledSessionItem.data.superEvent !== sessionSeries.id) {
       await log('warn', `ScheduledSession superEvent:${scheduledSessionItem.data.superEvent} and SessionSeries ID: ${sessionSeries.id} are not the same despite having the same hash: ${scheduledSessionSuperEventIdHash}`);
-      return;
+      continue;
     }
 
     // Link ScheduledSession and SessionSeries, and write
@@ -481,7 +426,7 @@ async function processScheduledSessionItems(items) {
   await log('info', 'geoSegment() - starting..');
 
   // Download and process SessionSeries
-  const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series`;
+  const sessionSeriesFirehoseUrl = `${firehoseBaseUrl}session-series?afterChangeNumber=56538437&limit=500`;
   await log('info', 'geoSegment() - downloading SessionSeries feed..');
   await downloadFirehosePageAndProcess(sessionSeriesFirehoseUrl, firehoseApiKey, processSessionSeriesItems, segments);
   await log('info', 'geoSegment() - downloaded SessionSeries feed');
