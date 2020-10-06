@@ -19,18 +19,26 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 You will need Node.js ^12.18.2 (LTS as of July 2020)
 
-1. Create a `geoSegment/config.json` file by copying `geoSegment/config.example.json` i.e.
+1. Download latest copy of script using the following git command
+
+    ```sh
+    git pull origin master
+    ```
+2. Create a `geoSegment/config.json` file by copying `geoSegment/config.example.json` i.e.
 
     ```sh
     cp geoSegment/config.example.json geoSegment/config.json
     ```
-2. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
-3. `npm install`
-4. `npm run geoSegment`
+3. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
+4. `npm install`
+5. `npm run geoSegment`
 
 The output segments will be in the `geoSegment/output/segments` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.txt` that contains the filename of each ScheduledSession in that folder.
 
 Additionally, a log will be saved to `geoSegment/output/log.txt`.
+
+### Model ScheduledSession
+After running the geoSegment script, in each segment folder there will be a `model.json` file. This file is an example ScheduledSession that has every property a ScheduledSession in this segment can have with sample values for each.
 
 ### Known Limitations
 
