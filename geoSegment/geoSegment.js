@@ -7,6 +7,7 @@ const Joi = require('joi');
 const moment = require('moment-timezone');
 const { performance } = require('perf_hooks');
 
+const pjson = require('../package.json');
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
 const { getFirehosePage } = require('./utils/getFirehosePage');
 const { wait } = require('./utils/wait');
@@ -31,7 +32,7 @@ const OUTPUT_LOG_FILE_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'log.txt');
 const RETRY_BACKOFF_MIN_SECONDS = 1;
 const RETRY_BACKOFF_MAX_SECONDS = 1024; // ~ 17 mins
 const RETRY_BACKOFF_EXPONENTIATION_RATE = 2;
-const MIN_REQUEST_DELAY_SECONDS = 0.1;
+const MIN_REQUEST_DELAY_SECONDS = 0.01;
 
 // Event Schedule generation
 const SCHEDULE_TYPE = 'Schedule';
@@ -423,6 +424,7 @@ async function processScheduledSessionItems(items) {
   // Create output/ directories
   await emptyOrMakeOutputDirectories(segments);
 
+  await log('info', `${pjson.name} v${pjson.version}`);
   await log('info', 'geoSegment() - starting..');
 
   // Download and process SessionSeries
