@@ -6,6 +6,7 @@ const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
 const { performance } = require('perf_hooks');
+const { dissocPath } = require('ramda');
 
 const pjson = require('../package.json');
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
@@ -66,7 +67,8 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 8;
  *   location?: OaLocation,
  *   'beta:affiliatedLocation'?: OaLocation,
  *   'imin:segment'?: string[],
- *   [k:string]: unknown
+ *   [k:string]: unknown,
+ *   superEvent: object
  * }} SessionSeriesData
  *
  * @typedef {{
@@ -162,16 +164,17 @@ async function emptyOrMakeOutputDirectories(segments) {
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
  */
-async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries) {
+async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries) {
   // Link ScheduledSession with SessionSeries
-  const linkedScheduledSessionData = {
+  const mergedScheduledSessionData = {
+    ...sessionSeries.superEvent,
+    ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
-    superEvent: sessionSeries,
   };
 
   // Write ScheduledSession into each output segment directory
   for (const segmentIdentifier of sessionSeries['imin:segment']) {
-    const scheduledSessionIdHash = hashString(linkedScheduledSessionData.id);
+    const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
     const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
@@ -182,18 +185,18 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
       const existingScheduledSession = await readJsonNullIfNotExists(scheduledSessionFilePath);
       isExistingScheduledSession = Boolean(existingScheduledSession);
       if (isExistingScheduledSession) {
-        if (existingScheduledSession.id !== linkedScheduledSessionData.id) {
+        if (existingScheduledSession.id !== mergedScheduledSessionData.id) {
           // Hash clash
-          await log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${linkedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
+          await log('warn', `Already downloaded ScheduledSession:${existingScheduledSession.id} and newly received ScheduledSession: ${mergedScheduledSessionData.id} are not the same despite having the same hash: ${scheduledSessionIdHash}`);
           continue;
         }
       }
     }
     // ScheduledSession does not already exist, so save it
-    await fs.writeJson(scheduledSessionFilePath, linkedScheduledSessionData);
+    await fs.writeJson(scheduledSessionFilePath, mergedScheduledSessionData);
 
     // Merge ScheduledSession into model.json and save
-    await mergeIntoModelExample(modelFilePath, linkedScheduledSessionData);
+    await mergeIntoModelExample(modelFilePath, mergedScheduledSessionData);
 
     // Write to the index file if this ScheduledSession did not already exist
     if (!isExistingScheduledSession) {
@@ -304,7 +307,7 @@ async function processSessionSeriesItems(items, segments) {
 
     // Write ScheduledSessions to file
     for (const generatedScheduledSession of scheduledSessionsForEveryEventSchedule) {
-      await linkScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData);
+      await mergeScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData);
     }
   }
 }
@@ -414,7 +417,7 @@ async function processScheduledSessionItems(items) {
     }
 
     // Link ScheduledSession and SessionSeries, and write
-    await linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries);
+    await mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries);
   }
 }
 
