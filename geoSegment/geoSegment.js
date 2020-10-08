@@ -106,7 +106,7 @@ function secondsToMilliseconds(seconds) {
  * @param {string} segmentIdentifier
  */
 function getSegmentIndexFilePath(segmentIdentifier) {
-  return path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, segmentIdentifier, 'index.csv');
+  return path.join(OUTPUT_SEGMENTS_DIRECTORY_PATH, segmentIdentifier, 'index.html');
 }
 
 /**
@@ -152,7 +152,6 @@ async function emptyOrMakeOutputDirectories(segments) {
     // Create index file
     const indexFilePath = getSegmentIndexFilePath(identifier);
     await createEmptyFile(indexFilePath);
-    await fs.appendFile(indexFilePath, '"Filenames"\r\n');
   }
   // ## Create log.txt file
   await createEmptyFile(OUTPUT_LOG_FILE_PATH);
@@ -199,7 +198,7 @@ async function linkScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData
     // Write to the index file if this ScheduledSession did not already exist
     if (!isExistingScheduledSession) {
       const indexFilePath = getSegmentIndexFilePath(segmentIdentifier);
-      await fs.appendFile(indexFilePath, `"${scheduledSessionIdHash}.json"\r\n`);
+      await fs.appendFile(indexFilePath, `<a href="${scheduledSessionIdHash}.json">link</a>\r\n`);
     }
   }
 }

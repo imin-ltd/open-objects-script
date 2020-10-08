@@ -33,7 +33,7 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
 4. `npm install`
 5. `npm run geoSegment`
 
-The output segments will be in the `geoSegment/output/segments` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.csv` that contains the filename of each ScheduledSession in that folder.
+The output segments will be in the `geoSegment/output/segments` folder, with a folder of ScheduledSessions for each segment. Also in each segment folder will be a file called `index.html` that contains the filename of each ScheduledSession in that folder.
 
 Additionally, a log will be saved to `geoSegment/output/log.txt`.
 
