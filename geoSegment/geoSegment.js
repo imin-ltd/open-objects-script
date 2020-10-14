@@ -47,7 +47,7 @@ const MINIMAL_EVENT_SCHEDULE_SCHEMA = Joi.object().keys({
 });
 
 // Time window
-const WEEKS_IN_FUTURE_TIME_WINDOW = 8;
+const WEEKS_IN_FUTURE_TIME_WINDOW = 1;
 
 /**
  * @typedef {import('axios').AxiosError} AxiosError
@@ -175,9 +175,11 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     ...{ name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name },
   };
 
+  const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
+  mergedScheduledSessionData['imin:fileIdentifier'] = scheduledSessionIdHash;
+
   // Write ScheduledSession into each output segment directory
   for (const segmentIdentifier of sessionSeries['imin:segment']) {
-    const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
     const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
