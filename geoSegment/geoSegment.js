@@ -64,6 +64,7 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 8;
  * }} OaLocation
  *
  * @typedef {{
+ *   name?: string,
  *   location?: OaLocation,
  *   'beta:affiliatedLocation'?: OaLocation,
  *   'imin:segment'?: string[],
@@ -78,6 +79,7 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 8;
  *  data: SessionSeriesData
  * }} SessionSeriesRpdeItem
  * @typedef {{
+ *  name?: string,
  *  startDate?: string,
  *  superEvent?: string,
  *  id?: string,
@@ -170,6 +172,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     ...sessionSeries.superEvent,
     ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
+    ...{ name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name },
   };
 
   // Write ScheduledSession into each output segment directory
