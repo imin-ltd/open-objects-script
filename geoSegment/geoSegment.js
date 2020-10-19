@@ -236,6 +236,11 @@ async function processSessionSeriesItems(items, segments) {
       continue;
     }
 
+    // Filter out high-frequency session data
+    if (item.data['beta:presentAsSlots'] || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'])) {
+      continue;
+    }
+
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
