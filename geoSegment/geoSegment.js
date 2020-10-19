@@ -237,7 +237,7 @@ async function processSessionSeriesItems(items, segments) {
     }
 
     // Filter out high-frequency session data
-    if (item.data['beta:presentAsSlots'] || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'])) {
+    if (item.data['beta:presentAsSlots'] === true || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'] === true)) {
       continue;
     }
 
