@@ -67,7 +67,7 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 1;
  *   name?: string,
  *   location?: OaLocation,
  *   'beta:affiliatedLocation'?: OaLocation,
- *   'imin:segment'?: string[],
+ *   'oo:segment'?: string[],
  *   [k:string]: unknown,
  *   superEvent: object
  * }} SessionSeriesData
@@ -81,6 +81,7 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 1;
  * @typedef {{
  *  name?: string,
  *  startDate?: string,
+ *  endDate?: string,
  *  superEvent?: string,
  *  id?: string,
  *  [k:string]: unknown
@@ -173,13 +174,19 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
     ...{ name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name },
+    ...{
+      'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
+      'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
+      'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
+      'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
+    },
   };
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
-  mergedScheduledSessionData['imin:fileIdentifier'] = scheduledSessionIdHash;
+  mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
 
   // Write ScheduledSession into each output segment directory
-  for (const segmentIdentifier of sessionSeries['imin:segment']) {
+  for (const segmentIdentifier of sessionSeries['oo:segment']) {
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
     const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
@@ -244,10 +251,10 @@ async function processSessionSeriesItems(items, segments) {
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
-      'imin:segment': [],
+      'oo:segment': [],
     };
 
-    // Add imin:segment if applicable
+    // Add oo:segment if applicable
     for (const segment of segments) {
       const segmentRadiusInMeters = segment.radius * 1000;
       const distanceBetweenGeos = geolib.getDistance(
@@ -255,11 +262,11 @@ async function processSessionSeriesItems(items, segments) {
         { latitude: segment.latitude, longitude: segment.longitude },
       );
       if (distanceBetweenGeos <= segmentRadiusInMeters) {
-        sessionSeriesData['imin:segment'].push(segment.identifier);
+        sessionSeriesData['oo:segment'].push(segment.identifier);
       }
     }
     // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
-    if (sessionSeriesData['imin:segment'].length === 0) {
+    if (sessionSeriesData['oo:segment'].length === 0) {
       continue;
     }
 
