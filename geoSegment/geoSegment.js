@@ -218,6 +218,10 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
   }
 }
 
+
+const isOfflineEvent = (item) => (!item.data.eventAttendanceMode || item.data.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.data.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode");
+
+
 /**
  * @param {SessionSeriesRpdeItem[]} items
  * @param {Segment[]} segments
@@ -239,8 +243,6 @@ async function processSessionSeriesItems(items, segments) {
     }
 
     const sessionSeriesGeoSegments = (() => {
-      let tempSegments = [];
-      let sessionSeriesPhysicalLocationGeo;
 
       const generateSegments = (physicalLocationGeo) => {
         let temp = [];
@@ -254,26 +256,25 @@ async function processSessionSeriesItems(items, segments) {
             temp.push(segment.identifier);
           }
         }
-
         return temp;
       }
 
-      if (!item.data.eventAttendanceMode || item.data.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.data.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode") { // offline event
+
+      if (isOfflineEvent(item)) {
         if (item.data.location && item.data.location.geo) {
-          sessionSeriesPhysicalLocationGeo = item.data.location.geo;
-          tempSegments = generateSegments(sessionSeriesPhysicalLocationGeo);
+          return generateSegments(item.data.location.geo);
         } else {
           return []; // no location data
         }
       } else if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
         if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) { // affiliate location present
-          sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
-          tempSegments = generateSegments(sessionSeriesPhysicalLocationGeo);
+          return generateSegments(item.data['beta:affiliatedLocation'].geo);
         } else {
-          tempSegments = segments.map(_ => _.identifier);
+          return segments.map(_ => _.identifier);
         }
       }
-      return tempSegments;
+
+      return [];
     })();
 
     /** @type {SessionSeriesData} */
