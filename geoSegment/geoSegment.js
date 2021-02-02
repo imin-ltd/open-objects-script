@@ -240,7 +240,11 @@ async function processSessionSeriesItems(items, segments) {
     } else if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) {
       sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
     } else {
-      continue;
+      sessionSeriesPhysicalLocationGeo = null;
+      // if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
+      // } else {
+      //   continue;
+      // }
     }
 
     // Filter out high-frequency session data
@@ -254,17 +258,23 @@ async function processSessionSeriesItems(items, segments) {
       'oo:segment': [],
     };
 
-    // Add oo:segment if applicable
-    for (const segment of segments) {
-      const segmentRadiusInMeters = segment.radius * 1000;
-      const distanceBetweenGeos = geolib.getDistance(
-        { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
-        { latitude: segment.latitude, longitude: segment.longitude },
-      );
-      if (distanceBetweenGeos <= segmentRadiusInMeters) {
-        sessionSeriesData['oo:segment'].push(segment.identifier);
-      }
+    if (!sessionSeriesPhysicalLocationGeo) {
+      sessionSeriesData["oo:segment"] = segments.map(segment => segment.identifier);
+    } else {
+// Add oo:segment if applicable
+for (const segment of segments) {
+  const segmentRadiusInMeters = segment.radius * 1000;
+  const distanceBetweenGeos = geolib.getDistance(
+    { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
+    { latitude: segment.latitude, longitude: segment.longitude },
+  );
+  if (distanceBetweenGeos <= segmentRadiusInMeters) {
+    sessionSeriesData['oo:segment'].push(segment.identifier);
+  }
+}
     }
+
+    
     // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
     if (sessionSeriesData['oo:segment'].length === 0) {
       continue;
