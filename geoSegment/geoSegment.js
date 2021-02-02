@@ -241,10 +241,6 @@ async function processSessionSeriesItems(items, segments) {
       sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
     } else {
       sessionSeriesPhysicalLocationGeo = null;
-      // if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
-      // } else {
-      //   continue;
-      // }
     }
 
     // Filter out high-frequency session data
@@ -259,19 +255,19 @@ async function processSessionSeriesItems(items, segments) {
     };
 
     if (!sessionSeriesPhysicalLocationGeo) {
-      sessionSeriesData["oo:segment"] = segments.map(segment => segment.identifier);
+      sessionSeriesData['oo:segment'] = segments.map(segment => segment.identifier);
     } else {
-// Add oo:segment if applicable
-for (const segment of segments) {
-  const segmentRadiusInMeters = segment.radius * 1000;
-  const distanceBetweenGeos = geolib.getDistance(
-    { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
-    { latitude: segment.latitude, longitude: segment.longitude },
-  );
-  if (distanceBetweenGeos <= segmentRadiusInMeters) {
-    sessionSeriesData['oo:segment'].push(segment.identifier);
-  }
-}
+      // Add oo:segment if applicable
+      for (const segment of segments) {
+        const segmentRadiusInMeters = segment.radius * 1000;
+        const distanceBetweenGeos = geolib.getDistance(
+          { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
+          { latitude: segment.latitude, longitude: segment.longitude },
+        );
+        if (distanceBetweenGeos <= segmentRadiusInMeters) {
+          sessionSeriesData['oo:segment'].push(segment.identifier);
+        }
+      }
     }
 
     
