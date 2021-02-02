@@ -233,42 +233,54 @@ async function processSessionSeriesItems(items, segments) {
       continue;
     }
 
-    // Filter virtual sessions
-    let sessionSeriesPhysicalLocationGeo;
-    if (item.data.location && item.data.location.geo) {
-      sessionSeriesPhysicalLocationGeo = item.data.location.geo;
-    } else if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) {
-      sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
-    } else {
-      sessionSeriesPhysicalLocationGeo = null;
-    }
-
     // Filter out high-frequency session data
     if (item.data['beta:presentAsSlots'] === true || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'] === true)) {
       continue;
     }
 
+    const sessionSeriesGeoSegments = (() => {
+      let tempSegments = [];
+      let sessionSeriesPhysicalLocationGeo;
+
+      const generateSegments = (physicalLocationGeo) => {
+        let temp = [];
+        for (const segment of segments) {
+          const segmentRadiusInMeters = segment.radius * 1000;
+          const distanceBetweenGeos = geolib.getDistance(
+            { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
+            { latitude: segment.latitude, longitude: segment.longitude },
+          );
+          if (distanceBetweenGeos <= segmentRadiusInMeters) {
+            temp.push(segment.identifier);
+          }
+        }
+
+        return temp;
+      }
+
+      if (!item.data.eventAttendanceMode || item.data.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.data.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode") { // offline event
+        if (item.data.location && item.data.location.geo) {
+          sessionSeriesPhysicalLocationGeo = item.data.location.geo;
+          tempSegments = generateSegments(sessionSeriesPhysicalLocationGeo);
+        } else {
+          return []; // no location data
+        }
+      } else if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
+        if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) { // affiliate location present
+          sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
+          tempSegments = generateSegments(sessionSeriesPhysicalLocationGeo);
+        } else {
+          tempSegments = segments.map(_ => _.identifier);
+        }
+      }
+      return tempSegments;
+    })();
+
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
-      'oo:segment': [],
+      'oo:segment': sessionSeriesGeoSegments,
     };
-
-    if (!sessionSeriesPhysicalLocationGeo) {
-      sessionSeriesData['oo:segment'] = segments.map(segment => segment.identifier);
-    } else {
-      // Add oo:segment if applicable
-      for (const segment of segments) {
-        const segmentRadiusInMeters = segment.radius * 1000;
-        const distanceBetweenGeos = geolib.getDistance(
-          { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
-          { latitude: segment.latitude, longitude: segment.longitude },
-        );
-        if (distanceBetweenGeos <= segmentRadiusInMeters) {
-          sessionSeriesData['oo:segment'].push(segment.identifier);
-        }
-      }
-    }
 
     
     // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
