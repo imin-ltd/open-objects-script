@@ -136,6 +136,8 @@ function logExitTime() {
   log('info', `Script run time: ${totalTimeSeconds.toFixed(2)} seconds`);
 }
 
+const isOfflineEvent = (item) => (!item.eventAttendanceMode || item.eventAttendanceMode === 'https://schema.org/OfflineEventAttendanceMode' || item.eventAttendanceMode === 'https://schema.org/MixedEventAttendanceMode');
+
 /**
  * @param {Segment[]} segments
  */
@@ -166,27 +168,61 @@ async function emptyOrMakeOutputDirectories(segments) {
 /**
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
+ * @param {Segment[]} segments
  */
-async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries) {
+async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries, segments) {
   // Link ScheduledSession with SessionSeries
   const mergedScheduledSessionData = {
     ...sessionSeries.superEvent,
     ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
-    ...{ name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name },
-    ...{
-      'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
-      'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
-      'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
-      'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
-    },
+    name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name,
+    'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
+    'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
+    'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
+    'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
   };
+
+  const scheduledSessionGeoSegments = (() => {
+    const generateSegments = (physicalLocationGeo) => {
+      const temp = [];
+      for (const segment of segments) {
+        const segmentRadiusInMeters = segment.radius * 1000;
+        const distanceBetweenGeos = geolib.getDistance(
+          { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
+          { latitude: segment.latitude, longitude: segment.longitude },
+        );
+        if (distanceBetweenGeos <= segmentRadiusInMeters) {
+          temp.push(segment.identifier);
+        }
+      }
+      return temp;
+    };
+
+    if (isOfflineEvent(mergedScheduledSessionData)) {
+      // if an offline event has a location, we calculate the overlapping segments
+      if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
+        return generateSegments(mergedScheduledSessionData.location.geo);
+      } // if there is no location data - no segments will overlap
+      return [];
+    } if (mergedScheduledSessionData.eventAttendanceMode === 'https://schema.org/OnlineEventAttendanceMode') {
+      // if an online event has an affiliated location, calculate the overlapping segments
+      if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) {
+        return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
+      }
+      // if no affiliated locations are present - add all segments
+      return segments.map((_) => _.identifier);
+    }
+    return [];
+  })();
+
+  mergedScheduledSessionData['oo:segment'] = scheduledSessionGeoSegments;
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
   mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
 
   // Write ScheduledSession into each output segment directory
-  for (const segmentIdentifier of sessionSeries['oo:segment']) {
+  for (const segmentIdentifier of mergedScheduledSessionData['oo:segment']) {
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
     const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
@@ -233,16 +269,6 @@ async function processSessionSeriesItems(items, segments) {
       continue;
     }
 
-    // Filter virtual sessions
-    let sessionSeriesPhysicalLocationGeo;
-    if (item.data.location && item.data.location.geo) {
-      sessionSeriesPhysicalLocationGeo = item.data.location.geo;
-    } else if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) {
-      sessionSeriesPhysicalLocationGeo = item.data['beta:affiliatedLocation'].geo;
-    } else {
-      continue;
-    }
-
     // Filter out high-frequency session data
     if (item.data['beta:presentAsSlots'] === true || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'] === true)) {
       continue;
@@ -251,24 +277,7 @@ async function processSessionSeriesItems(items, segments) {
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
-      'oo:segment': [],
     };
-
-    // Add oo:segment if applicable
-    for (const segment of segments) {
-      const segmentRadiusInMeters = segment.radius * 1000;
-      const distanceBetweenGeos = geolib.getDistance(
-        { latitude: sessionSeriesPhysicalLocationGeo.latitude, longitude: sessionSeriesPhysicalLocationGeo.longitude },
-        { latitude: segment.latitude, longitude: segment.longitude },
-      );
-      if (distanceBetweenGeos <= segmentRadiusInMeters) {
-        sessionSeriesData['oo:segment'].push(segment.identifier);
-      }
-    }
-    // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
-    if (sessionSeriesData['oo:segment'].length === 0) {
-      continue;
-    }
 
     // Validate Schedules and generate ScheduledSessions if needed
     const scheduledSessionsForEveryEventSchedule = [];
@@ -324,7 +333,7 @@ async function processSessionSeriesItems(items, segments) {
 
     // Write ScheduledSessions to file
     for (const generatedScheduledSession of scheduledSessionsForEveryEventSchedule) {
-      await mergeScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData);
+      await mergeScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData, segments);
     }
   }
 }
@@ -376,6 +385,7 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
   // Get page from Firehose
   let nextUrl = firehosePageUrl;
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { nextNextUrl, items } = await getFirehosePageWithExponentialBackoff(nextUrl, firehoseApiKey);
 
@@ -395,8 +405,9 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 
 /**
  * @param {ScheduledSessionRpdeItem[]} items
+ * @param {Segment[]} segments
  */
-async function processScheduledSessionItems(items) {
+async function processScheduledSessionItems(items, segments) {
   for (const scheduledSessionItem of items) {
     // Filter deleted ScheduledSessions
     if (scheduledSessionItem.state === 'deleted') {
@@ -434,7 +445,7 @@ async function processScheduledSessionItems(items) {
     }
 
     // Link ScheduledSession and SessionSeries, and write
-    await mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries);
+    await mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries, segments);
   }
 }
 
