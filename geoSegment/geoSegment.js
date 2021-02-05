@@ -168,6 +168,7 @@ async function emptyOrMakeOutputDirectories(segments) {
 /**
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
+ * @param {Segment[]} segments
  */
 async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries, segments) {
   // Link ScheduledSession with SessionSeries
@@ -199,14 +200,17 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     };
 
     if (isOfflineEvent(mergedScheduledSessionData)) {
+      // if an offline event has a location, we calculate the overlapping segments
       if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
         return generateSegments(mergedScheduledSessionData.location.geo);
-      }
-      return []; // no location data
+      } // if there is no location data - no segments will overlap
+      return [];
     } if (mergedScheduledSessionData.eventAttendanceMode === 'https://schema.org/OnlineEventAttendanceMode') {
-      if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) { // affiliate location present
+      // if an online event has an affiliated location, calculate the overlapping segments
+      if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) {
         return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
       }
+      // if no affiliated locations are present - add all segments
       return segments.map((_) => _.identifier);
     }
     return [];
@@ -270,49 +274,10 @@ async function processSessionSeriesItems(items, segments) {
       continue;
     }
 
-    // const sessionSeriesGeoSegments = (() => {
-    //   const generateSegments = (physicalLocationGeo) => {
-    //     let temp = [];
-    //     for (const segment of segments) {
-    //       const segmentRadiusInMeters = segment.radius * 1000;
-    //       const distanceBetweenGeos = geolib.getDistance(
-    //         { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
-    //         { latitude: segment.latitude, longitude: segment.longitude },
-    //       );
-    //       if (distanceBetweenGeos <= segmentRadiusInMeters) {
-    //         temp.push(segment.identifier);
-    //       }
-    //     }
-    //     return temp;
-    //   }
-
-    //   if (isOfflineEvent(item)) {
-    //     if (item.data.location && item.data.location.geo) {
-    //       return generateSegments(item.data.location.geo);
-    //     } else {
-    //       return []; // no location data
-    //     }
-    //   } else if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
-    //     if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) { // affiliate location present
-    //       return generateSegments(item.data['beta:affiliatedLocation'].geo);
-    //     } else {
-    //       return segments.map(_ => _.identifier);
-    //     }
-    //   }
-
-    //   return [];
-    // })();
-
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
-      // 'oo:segment': sessionSeriesGeoSegments,
     };
-
-    // // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
-    // if (sessionSeriesData['oo:segment'].length === 0) {
-    //   continue;
-    // }
 
     // Validate Schedules and generate ScheduledSessions if needed
     const scheduledSessionsForEveryEventSchedule = [];
@@ -440,6 +405,7 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 
 /**
  * @param {ScheduledSessionRpdeItem[]} items
+ * @param {Segment[]} segments
  */
 async function processScheduledSessionItems(items, segments) {
   for (const scheduledSessionItem of items) {
