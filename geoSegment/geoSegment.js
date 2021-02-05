@@ -180,7 +180,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
       'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
       'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
     },
-  };
+  }; // scheduled sesssion -> all info ??? analysis here
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
   mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
@@ -218,9 +218,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
   }
 }
 
-
 const isOfflineEvent = (item) => (!item.data.eventAttendanceMode || item.data.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.data.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode");
-
 
 /**
  * @param {SessionSeriesRpdeItem[]} items
@@ -243,7 +241,6 @@ async function processSessionSeriesItems(items, segments) {
     }
 
     const sessionSeriesGeoSegments = (() => {
-
       const generateSegments = (physicalLocationGeo) => {
         let temp = [];
         for (const segment of segments) {
