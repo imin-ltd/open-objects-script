@@ -136,6 +136,8 @@ function logExitTime() {
   log('info', `Script run time: ${totalTimeSeconds.toFixed(2)} seconds`);
 }
 
+const isOfflineEvent = (item) => (!item.eventAttendanceMode || item.eventAttendanceMode === 'https://schema.org/OfflineEventAttendanceMode' || item.eventAttendanceMode === 'https://schema.org/MixedEventAttendanceMode');
+
 /**
  * @param {Segment[]} segments
  */
@@ -174,49 +176,43 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
     name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name,
-      'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
-      'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
-      'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
-      'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
-  }; 
+    'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
+    'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
+    'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
+    'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
+  };
 
-
-
-    const scheduledSessionGeoSegments = (() => {
-      const generateSegments = (physicalLocationGeo) => {
-        let temp = [];
-        for (const segment of segments) {
-          const segmentRadiusInMeters = segment.radius * 1000;
-          const distanceBetweenGeos = geolib.getDistance(
-            { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
-            { latitude: segment.latitude, longitude: segment.longitude },
-          );
-          if (distanceBetweenGeos <= segmentRadiusInMeters) {
-            temp.push(segment.identifier);
-          }
-        }
-        return temp;
-      }
-
-
-      if (isOfflineEvent(mergedScheduledSessionData)) {
-        if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
-          return generateSegments(mergedScheduledSessionData.location.geo);
-        } else {
-          return []; // no location data
-        }
-      } else if (mergedScheduledSessionData.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
-        if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) { // affiliate location present
-          return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
-        } else {
-          return segments.map(_ => _.identifier);
+  const scheduledSessionGeoSegments = (() => {
+    const generateSegments = (physicalLocationGeo) => {
+      const temp = [];
+      for (const segment of segments) {
+        const segmentRadiusInMeters = segment.radius * 1000;
+        const distanceBetweenGeos = geolib.getDistance(
+          { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
+          { latitude: segment.latitude, longitude: segment.longitude },
+        );
+        if (distanceBetweenGeos <= segmentRadiusInMeters) {
+          temp.push(segment.identifier);
         }
       }
-      return [];
-    })();
+      return temp;
+    };
 
+    if (isOfflineEvent(mergedScheduledSessionData)) {
+      if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
+        return generateSegments(mergedScheduledSessionData.location.geo);
+      }
+      return []; // no location data
+    } if (mergedScheduledSessionData.eventAttendanceMode === 'https://schema.org/OnlineEventAttendanceMode') {
+      if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) { // affiliate location present
+        return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
+      }
+      return segments.map((_) => _.identifier);
+    }
+    return [];
+  })();
 
-  mergedScheduledSessionData["oo:segment"] = scheduledSessionGeoSegments;
+  mergedScheduledSessionData['oo:segment'] = scheduledSessionGeoSegments;
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
   mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
@@ -254,8 +250,6 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
   }
 }
 
-const isOfflineEvent = (item) => (!item.eventAttendanceMode || item.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode");
-
 /**
  * @param {SessionSeriesRpdeItem[]} items
  * @param {Segment[]} segments
@@ -292,7 +286,6 @@ async function processSessionSeriesItems(items, segments) {
     //     return temp;
     //   }
 
-
     //   if (isOfflineEvent(item)) {
     //     if (item.data.location && item.data.location.geo) {
     //       return generateSegments(item.data.location.geo);
@@ -316,7 +309,6 @@ async function processSessionSeriesItems(items, segments) {
       // 'oo:segment': sessionSeriesGeoSegments,
     };
 
-    
     // // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
     // if (sessionSeriesData['oo:segment'].length === 0) {
     //   continue;
@@ -428,6 +420,7 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
   // Get page from Firehose
   let nextUrl = firehosePageUrl;
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { nextNextUrl, items } = await getFirehosePageWithExponentialBackoff(nextUrl, firehoseApiKey);
 
