@@ -167,26 +167,62 @@ async function emptyOrMakeOutputDirectories(segments) {
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
  */
-async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries) {
+async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries, segments) {
   // Link ScheduledSession with SessionSeries
   const mergedScheduledSessionData = {
     ...sessionSeries.superEvent,
     ...dissocPath(['superEvent'], sessionSeries),
     ...scheduledSessionData,
-    ...{ name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name },
-    ...{
+    name: (sessionSeries.superEvent && sessionSeries.superEvent.name) || sessionSeries.name || scheduledSessionData.name,
       'oo:localStartDate': moment(scheduledSessionData.startDate).tz('Europe/London').format('DD/MM/YYYY'),
       'oo:localStartTime': moment(scheduledSessionData.startDate).tz('Europe/London').format('HH:mm'),
       'oo:localEndDate': moment(scheduledSessionData.endDate).tz('Europe/London').format('DD/MM/YYYY'),
       'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
-    },
-  }; // scheduled sesssion -> all info ??? analysis here
+  }; 
+
+
+
+    const scheduledSessionGeoSegments = (() => {
+      const generateSegments = (physicalLocationGeo) => {
+        let temp = [];
+        for (const segment of segments) {
+          const segmentRadiusInMeters = segment.radius * 1000;
+          const distanceBetweenGeos = geolib.getDistance(
+            { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
+            { latitude: segment.latitude, longitude: segment.longitude },
+          );
+          if (distanceBetweenGeos <= segmentRadiusInMeters) {
+            temp.push(segment.identifier);
+          }
+        }
+        return temp;
+      }
+
+
+      if (isOfflineEvent(mergedScheduledSessionData)) {
+        if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
+          return generateSegments(mergedScheduledSessionData.location.geo);
+        } else {
+          return []; // no location data
+        }
+      } else if (mergedScheduledSessionData.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
+        if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) { // affiliate location present
+          return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
+        } else {
+          return segments.map(_ => _.identifier);
+        }
+      }
+      return [];
+    })();
+
+
+  mergedScheduledSessionData["oo:segment"] = scheduledSessionGeoSegments;
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
   mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
 
   // Write ScheduledSession into each output segment directory
-  for (const segmentIdentifier of sessionSeries['oo:segment']) {
+  for (const segmentIdentifier of mergedScheduledSessionData['oo:segment']) {
     const scheduledSessionFilePath = getScheduledSessionFilePath(segmentIdentifier, scheduledSessionIdHash);
     const modelFilePath = getScheduledSessionFilePath(segmentIdentifier, 'model');
 
@@ -218,7 +254,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
   }
 }
 
-const isOfflineEvent = (item) => (!item.data.eventAttendanceMode || item.data.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.data.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode");
+const isOfflineEvent = (item) => (!item.eventAttendanceMode || item.eventAttendanceMode === "https://schema.org/OfflineEventAttendanceMode" || item.eventAttendanceMode === "https://schema.org/MixedEventAttendanceMode");
 
 /**
  * @param {SessionSeriesRpdeItem[]} items
@@ -240,51 +276,51 @@ async function processSessionSeriesItems(items, segments) {
       continue;
     }
 
-    const sessionSeriesGeoSegments = (() => {
-      const generateSegments = (physicalLocationGeo) => {
-        let temp = [];
-        for (const segment of segments) {
-          const segmentRadiusInMeters = segment.radius * 1000;
-          const distanceBetweenGeos = geolib.getDistance(
-            { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
-            { latitude: segment.latitude, longitude: segment.longitude },
-          );
-          if (distanceBetweenGeos <= segmentRadiusInMeters) {
-            temp.push(segment.identifier);
-          }
-        }
-        return temp;
-      }
+    // const sessionSeriesGeoSegments = (() => {
+    //   const generateSegments = (physicalLocationGeo) => {
+    //     let temp = [];
+    //     for (const segment of segments) {
+    //       const segmentRadiusInMeters = segment.radius * 1000;
+    //       const distanceBetweenGeos = geolib.getDistance(
+    //         { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
+    //         { latitude: segment.latitude, longitude: segment.longitude },
+    //       );
+    //       if (distanceBetweenGeos <= segmentRadiusInMeters) {
+    //         temp.push(segment.identifier);
+    //       }
+    //     }
+    //     return temp;
+    //   }
 
 
-      if (isOfflineEvent(item)) {
-        if (item.data.location && item.data.location.geo) {
-          return generateSegments(item.data.location.geo);
-        } else {
-          return []; // no location data
-        }
-      } else if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
-        if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) { // affiliate location present
-          return generateSegments(item.data['beta:affiliatedLocation'].geo);
-        } else {
-          return segments.map(_ => _.identifier);
-        }
-      }
+    //   if (isOfflineEvent(item)) {
+    //     if (item.data.location && item.data.location.geo) {
+    //       return generateSegments(item.data.location.geo);
+    //     } else {
+    //       return []; // no location data
+    //     }
+    //   } else if (item.data.eventAttendanceMode === "https://schema.org/OnlineEventAttendanceMode") {
+    //     if (item.data['beta:affiliatedLocation'] && item.data['beta:affiliatedLocation'].geo) { // affiliate location present
+    //       return generateSegments(item.data['beta:affiliatedLocation'].geo);
+    //     } else {
+    //       return segments.map(_ => _.identifier);
+    //     }
+    //   }
 
-      return [];
-    })();
+    //   return [];
+    // })();
 
     /** @type {SessionSeriesData} */
     const sessionSeriesData = {
       ...item.data,
-      'oo:segment': sessionSeriesGeoSegments,
+      // 'oo:segment': sessionSeriesGeoSegments,
     };
 
     
-    // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
-    if (sessionSeriesData['oo:segment'].length === 0) {
-      continue;
-    }
+    // // If there are no segments, drop the SessionSeries as it will not appear in an output folder and therefore we don't need to store it
+    // if (sessionSeriesData['oo:segment'].length === 0) {
+    //   continue;
+    // }
 
     // Validate Schedules and generate ScheduledSessions if needed
     const scheduledSessionsForEveryEventSchedule = [];
@@ -340,7 +376,7 @@ async function processSessionSeriesItems(items, segments) {
 
     // Write ScheduledSessions to file
     for (const generatedScheduledSession of scheduledSessionsForEveryEventSchedule) {
-      await mergeScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData);
+      await mergeScheduledSessionAndSessionSeriesAndWrite(generatedScheduledSession, sessionSeriesData, segments);
     }
   }
 }
@@ -412,7 +448,7 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 /**
  * @param {ScheduledSessionRpdeItem[]} items
  */
-async function processScheduledSessionItems(items) {
+async function processScheduledSessionItems(items, segments) {
   for (const scheduledSessionItem of items) {
     // Filter deleted ScheduledSessions
     if (scheduledSessionItem.state === 'deleted') {
@@ -450,7 +486,7 @@ async function processScheduledSessionItems(items) {
     }
 
     // Link ScheduledSession and SessionSeries, and write
-    await mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries);
+    await mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionItem.data, sessionSeries, segments);
   }
 }
 
