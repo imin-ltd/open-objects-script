@@ -13,13 +13,10 @@ const Config = s.type({
     latitude: s.float,
     longitude: s.float,
     radius: s.float,
-    attendanceModeFilter: s.union([
-      s.literal('virtual-only'),
-      s.union([
-        s.literal('physical-only'),
-        s.literal('all'),
-      ]),
-    ]),
+    attendanceModeFilter: s.literalStringEnum(/** @type {['virtual-only', 'physical-only', 'all']} */([
+      'virtual-only',
+      'physical-only',
+      'all'])),
   })),
 });
 
