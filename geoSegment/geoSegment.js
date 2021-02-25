@@ -2,13 +2,13 @@ const path = require('path');
 const { backOff } = require('exponential-backoff');
 const fs = require('fs-extra');
 const fsPromises = require('fs').promises;
-const geolib = require('geolib');
 const Joi = require('joi');
 const moment = require('moment-timezone');
 const { performance } = require('perf_hooks');
 const { dissocPath } = require('ramda');
 
 const pjson = require('../package.json');
+const { loadConfig } = require('./utils/config');
 const { generateDatesWithinTimeWindow } = require('./utils/generateDatesWithinTimeWindow');
 const { getFirehosePage } = require('./utils/getFirehosePage');
 const { wait } = require('./utils/wait');
@@ -19,11 +19,11 @@ const { log, setGlobalLogFilePathMut } = require('./utils/log');
 const { createEmptyFile } = require('./utils/createEmptyFile');
 const { mergeIntoModelExample } = require('./utils/mergeIntoModelExample');
 const { readJsonNullIfNotExists } = require('./utils/readJsonNullIfNotExists');
+const { generateSegmentIdentifiersForMergedScheduledSession } = require('./utils/segments');
 
 const scriptStartTime = performance.now();
 
 // File paths
-const CONFIG_FILE_PATH = path.join(__dirname, 'config.json');
 const OUTPUT_DIRECTORY_PATH = path.join(__dirname, 'output');
 const OUTPUT_SESSION_SERIES_DIRECTORY_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'sessionseries');
 const OUTPUT_SEGMENTS_DIRECTORY_PATH = path.join(OUTPUT_DIRECTORY_PATH, 'segments');
@@ -53,6 +53,7 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 1;
  * @typedef {import('axios').AxiosError} AxiosError
  * @typedef {import('axios').AxiosRequestConfig} AxiosRequestConfig
  * @typedef {import('axios').AxiosResponse} AxiosResponse
+ * @typedef {import('./utils/config').ConfigSegmentType} ConfigSegmentType
  */
 
 /**
@@ -92,12 +93,6 @@ const WEEKS_IN_FUTURE_TIME_WINDOW = 1;
  *  kind: 'ScheduledSession',
  *  data: ScheduledSessionData
  * }} ScheduledSessionRpdeItem
- * @typedef {{
- *  latitude: number,
- *  longitude: number,
- *  radius: number,
- *  identifier: string
- * }} Segment
  */
 
 /**
@@ -136,10 +131,8 @@ function logExitTime() {
   log('info', `Script run time: ${totalTimeSeconds.toFixed(2)} seconds`);
 }
 
-const isOfflineEvent = (item) => (!item.eventAttendanceMode || item.eventAttendanceMode === 'https://schema.org/OfflineEventAttendanceMode' || item.eventAttendanceMode === 'https://schema.org/MixedEventAttendanceMode');
-
 /**
- * @param {Segment[]} segments
+ * @param {ConfigSegmentType[]} segments
  */
 async function emptyOrMakeOutputDirectories(segments) {
   // ## Create or empty root output/ directory
@@ -168,7 +161,7 @@ async function emptyOrMakeOutputDirectories(segments) {
 /**
  * @param {ScheduledSessionData} scheduledSessionData
  * @param {SessionSeriesData} sessionSeries
- * @param {Segment[]} segments
+ * @param {ConfigSegmentType[]} segments
  */
 async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionData, sessionSeries, segments) {
   // Link ScheduledSession with SessionSeries
@@ -183,40 +176,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
     'oo:localEndTime': moment(scheduledSessionData.endDate).tz('Europe/London').format('HH:mm'),
   };
 
-  const scheduledSessionGeoSegments = (() => {
-    const generateSegments = (physicalLocationGeo) => {
-      const temp = [];
-      for (const segment of segments) {
-        const segmentRadiusInMeters = segment.radius * 1000;
-        const distanceBetweenGeos = geolib.getDistance(
-          { latitude: physicalLocationGeo.latitude, longitude: physicalLocationGeo.longitude },
-          { latitude: segment.latitude, longitude: segment.longitude },
-        );
-        if (distanceBetweenGeos <= segmentRadiusInMeters) {
-          temp.push(segment.identifier);
-        }
-      }
-      return temp;
-    };
-
-    if (isOfflineEvent(mergedScheduledSessionData)) {
-      // if an offline event has a location, we calculate the overlapping segments
-      if (mergedScheduledSessionData.location && mergedScheduledSessionData.location.geo) {
-        return generateSegments(mergedScheduledSessionData.location.geo);
-      } // if there is no location data - no segments will overlap
-      return [];
-    } if (mergedScheduledSessionData.eventAttendanceMode === 'https://schema.org/OnlineEventAttendanceMode') {
-      // if an online event has an affiliated location, calculate the overlapping segments
-      if (mergedScheduledSessionData['beta:affiliatedLocation'] && mergedScheduledSessionData['beta:affiliatedLocation'].geo) {
-        return generateSegments(mergedScheduledSessionData['beta:affiliatedLocation'].geo);
-      }
-      // if no affiliated locations are present - add all segments
-      return segments.map((_) => _.identifier);
-    }
-    return [];
-  })();
-
-  mergedScheduledSessionData['oo:segment'] = scheduledSessionGeoSegments;
+  mergedScheduledSessionData['oo:segment'] = generateSegmentIdentifiersForMergedScheduledSession(mergedScheduledSessionData, segments);
 
   const scheduledSessionIdHash = hashString(mergedScheduledSessionData.id);
   mergedScheduledSessionData['oo:fileIdentifier'] = scheduledSessionIdHash;
@@ -256,7 +216,7 @@ async function mergeScheduledSessionAndSessionSeriesAndWrite(scheduledSessionDat
 
 /**
  * @param {SessionSeriesRpdeItem[]} items
- * @param {Segment[]} segments
+ * @param {ConfigSegmentType[]} segments
  */
 async function processSessionSeriesItems(items, segments) {
   for (const item of items) {
@@ -379,8 +339,8 @@ async function getFirehosePageWithExponentialBackoff(url, firehoseApiKey) { // e
  * @typedef {ScheduledSessionRpdeItem[]|SessionSeriesRpdeItem[]} Items
  * @param {string} firehosePageUrl
  * @param {string} firehoseApiKey
- * @param {(items: Items, segments: Segment[]) => Promise<void>} processItemsFn
- * @param {Segment[]} segments
+ * @param {(items: Items, segments: ConfigSegmentType[]) => Promise<void>} processItemsFn
+ * @param {ConfigSegmentType[]} segments
  */
 async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, processItemsFn, segments) {
   // Get page from Firehose
@@ -405,11 +365,11 @@ async function downloadFirehosePageAndProcess(firehosePageUrl, firehoseApiKey, p
 
 /**
  * @param {ScheduledSessionRpdeItem[]} items
- * @param {Segment[]} segments
+ * @param {ConfigSegmentType[]} segments
  */
 async function processScheduledSessionItems(items, segments) {
   for (const scheduledSessionItem of items) {
-    // Filter deleted ScheduledSessions
+    // Exclude deleted ScheduledSessions
     if (scheduledSessionItem.state === 'deleted') {
       continue;
     }
@@ -418,12 +378,12 @@ async function processScheduledSessionItems(items, segments) {
       continue;
     }
 
-    // Filter ScheduledSessions in the past
+    // Exclude ScheduledSessions in the past
     if (!scheduledSessionItem.data.startDate || moment(scheduledSessionItem.data.startDate).isBefore(moment())) {
       continue;
     }
 
-    // Filter ScheduledSession not in future time window
+    // Exclude ScheduledSession not in future time window
     if (moment(scheduledSessionItem.data.startDate).isAfter(moment().add(WEEKS_IN_FUTURE_TIME_WINDOW, 'weeks'))) {
       continue;
     }
@@ -451,7 +411,7 @@ async function processScheduledSessionItems(items, segments) {
 
 (async () => {
   // Load config file into memory
-  const { firehoseBaseUrl, firehoseApiKey, segments } = await fs.readJson(CONFIG_FILE_PATH);
+  const { firehoseBaseUrl, firehoseApiKey, segments } = await loadConfig();
 
   // Create output/ directories
   await emptyOrMakeOutputDirectories(segments);
@@ -476,4 +436,5 @@ async function processScheduledSessionItems(items, segments) {
 process.on('uncaughtException', (error) => {
   log('error', 'Fatal exception', error);
   logExitTime();
+  process.exit(1);
 });

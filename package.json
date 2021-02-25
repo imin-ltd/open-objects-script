@@ -4,7 +4,7 @@
   "description": "",
   "main": "walkRpde.js",
   "scripts": {
-    "geoSegment": "node geoSegment/geoSegment.js",
+    "geoSegment": "node --unhandled-rejections=strict geoSegment/geoSegment.js",
     "lint": "eslint 'geoSegment/**/*.js'",
     "test": "npm run lint && tsc"
   },
@@ -24,9 +24,10 @@
     "eslint": "^7.9.0",
     "eslint-config-airbnb-base": "^14.2.0",
     "eslint-plugin-import": "^2.22.0",
-    "typescript": "^3.9.6"
+    "typescript": "^4.2.2"
   },
   "dependencies": {
+    "@imin/speck": "github:imin-ltd/speck#f72b7ba",
     "axios": "^0.19.2",
     "deepmerge": "^4.2.2",
     "exponential-backoff": "^3.1.0",

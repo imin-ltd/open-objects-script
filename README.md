@@ -29,7 +29,12 @@ You will need Node.js ^12.18.2 (LTS as of July 2020)
     ```sh
     cp geoSegment/config.example.json geoSegment/config.json
     ```
-3. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments. Radius is in kilometres.
+3. Edit the `geoSegment/config.js` file to include your Firehose API key and your desired segments.
+  * `radius` is in kilometres.
+  * Options for `attendanceModeFilter`:
+    * `virtual-only` - Only virtual sessions will be included
+    * `physical-only` - Only physical sessions will be included
+    * `all` - All sessions - virtual & physical - will be included
 4. `npm install`
 5. `npm run geoSegment`
 
