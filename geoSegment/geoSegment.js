@@ -230,6 +230,10 @@ async function processSessionSeriesItems(items, segments) {
     }
 
     // Filter out high-frequency session data
+    if (item.data['imin:presentAsSlots'] === true || (item.data.superEvent && item.data.superEvent['imin:presentAsSlots'] === true)) {
+      continue;
+    }
+    // Remove 2 weeks after https://github.com/imin-ltd/platform-agg/pull/884 is released
     if (item.data['beta:presentAsSlots'] === true || (item.data.superEvent && item.data.superEvent['beta:presentAsSlots'] === true)) {
       continue;
     }
